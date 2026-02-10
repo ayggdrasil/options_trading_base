@@ -10,27 +10,79 @@
 
 ## 🚀 Quick Start
 
+### For External Agent Developers
+
+If you're building an AI agent (like OpenClaw) and want to connect to Callput's on-chain options:
+
 ```bash
-# Install dependencies
+# 1. Clone the repository
+git clone https://github.com/ayggdrasil/options_trading_base.git
+cd options_trading_base
+
+# 2. Install dependencies
 npm install
 
-# Build
+# 3. Build
 npm run build
 
-# Run
-npm start
+# 4. Test connection
+node build/test_connection.js
 ```
 
-### For Claude Desktop
+Expected output:
+```
+✅ Connected! Current block: 41973480
+✅ Fetched option data from ViewAggregator
+✅ SUCCESS: Server can fetch real option data from Base L2!
+```
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+---
+
+## 🔌 Integration with Your Agent
+
+### Method 1: Direct MCP Client (Recommended)
+
+For custom agents (Telegram bots, Discord bots, etc.), use the MCP SDK:
+
+```typescript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+// Connect to MCP server
+const transport = new StdioClientTransport({
+  command: "node",
+  args: ["./build/index.js"],
+  env: { RPC_URL: "https://mainnet.base.org" }
+});
+
+const client = new Client({
+  name: "my-agent",
+  version: "1.0.0"
+}, {
+  capabilities: {}
+});
+
+await client.connect(transport);
+
+// Query options
+const result = await client.callTool({
+  name: "get_option_chains",
+  arguments: { underlying_asset: "WETH" }
+});
+
+console.log(result.content[0].text);
+```
+
+### Method 2: Claude Desktop
+
+For Claude Desktop users, add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": ["/path/to/callput-agent-mcp/build/index.js"],
+      "args": ["/absolute/path/to/options_trading_base/build/index.js"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -38,6 +90,11 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+**Config file locations:**
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
 ---
 
@@ -75,13 +132,24 @@ Fetch available option chains for BTC or ETH.
 **Output:** Array of options with human-readable formatting:
 ```json
 {
-  "option_token_id": "123...",
-  "display": {
-    "instrument": "WETH-20FEB24-3000-C",
-    "description": "Buy Call @ 3000 expiring 20FEB24",
-    "days_to_expiry": 15,
-    "liquidity_formatted": "0.5000 WETH"
-  }
+  "underlying_asset": "WETH",
+  "total_options": 2,
+  "options": [{
+    "option_token_id": "123...",
+    "underlying_asset": "WETH",
+    "strategy": "BuyCall",
+    "strike_price": 3000,
+    "expiry": 1730000000,
+    "liquidity": "500000000000000000",
+    "display": {
+      "instrument": "WETH-20FEB24-3000-C",
+      "description": "Buy Call @ 3000 expiring 20FEB24",
+      "type": "Call",
+      "side": "Buy",
+      "days_to_expiry": 15,
+      "liquidity_formatted": "0.5000 WETH"
+    }
+  }]
 }
 ```
 
@@ -104,7 +172,8 @@ Generate transaction calldata for opening a position.
   "to": "0x83B04...",
   "data": "0x1a2b3c...",
   "value": "50000000000000",
-  "chain_id": 8453
+  "chain_id": 8453,
+  "description": "Open Position for BuyCall..."
 }
 ```
 
@@ -115,6 +184,7 @@ Generate transaction calldata for opening a position.
 - **[Architecture Guide](./ARCHITECTURE.md)** - How the system works
 - **[MCP Setup](./MCP_SETUP.md)** - Integration with AI agents
 - **[Example Output](./EXAMPLE_OUTPUT.md)** - API response samples
+- **[Contributing](./CONTRIBUTING.md)** - How to contribute
 
 ---
 
@@ -136,12 +206,14 @@ This server generates **unsigned transactions**. Your agent must:
 4. ✅ Approve ERC20 spending (USDC/WETH → PositionManager)
 5. ✅ Estimate gas fees
 
+**Security Note:** Never expose private keys to the MCP server. Handle all signing client-side.
+
 ---
 
 ## 🏗️ Project Structure
 
 ```
-callput-agent-mcp/
+options_trading_base/
 ├── src/
 │   ├── index.ts          # MCP server implementation
 │   ├── config.ts         # Contract addresses & RPC config
@@ -169,13 +241,61 @@ node build/test_connection.js
 npx @modelcontextprotocol/inspector node build/index.js
 ```
 
+Opens a web UI at `http://localhost:6274` for manual testing.
+
 ---
 
 ## 🌐 Environment Variables
 
 ```bash
-# Optional: Custom RPC endpoint
+# Optional: Custom RPC endpoint (defaults to public Base RPC)
 RPC_URL=https://your-base-rpc.com
+```
+
+Create a `.env` file in the project root:
+```
+RPC_URL=https://mainnet.base.org
+```
+
+---
+
+## 💬 Example: Telegram Bot Integration
+
+```python
+# Python example for Telegram bot
+import subprocess
+import json
+
+def query_options(asset="WETH"):
+    # Start MCP server
+    process = subprocess.Popen(
+        ["node", "build/index.js"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    # Send MCP request
+    request = {
+        "method": "tools/call",
+        "params": {
+            "name": "get_option_chains",
+            "arguments": {"underlying_asset": asset}
+        }
+    }
+    
+    process.stdin.write(json.dumps(request).encode())
+    process.stdin.flush()
+    
+    # Read response
+    response = process.stdout.readline()
+    return json.loads(response)
+
+# Use in Telegram handler
+@bot.message_handler(commands=['options'])
+def send_options(message):
+    options = query_options("WETH")
+    bot.reply_to(message, f"Found {len(options)} WETH options")
 ```
 
 ---
@@ -192,6 +312,23 @@ RPC_URL=https://your-base-rpc.com
 
 ---
 
+## 🐛 Troubleshooting
+
+**"Connection failed" error:**
+- Check your internet connection
+- Verify RPC_URL is accessible
+- Try alternative RPC: `https://base.llamarpc.com` or `https://base-rpc.publicnode.com`
+
+**"No options found":**
+- Markets may be inactive
+- Check on callput.app if options are available
+
+**MCP connection issues:**
+- Ensure `npm run build` completed successfully
+- Verify Node.js version >= 18
+
+---
+
 ## 📄 License
 
 MIT License - see [LICENSE](./LICENSE) file
@@ -200,7 +337,7 @@ MIT License - see [LICENSE](./LICENSE) file
 
 ## 🤝 Contributing
 
-Contributions welcome! Please open an issue or PR.
+Contributions welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) first.
 
 ---
 
@@ -209,6 +346,7 @@ Contributions welcome! Please open an issue or PR.
 - [Callput Protocol](https://callput.app)
 - [Base L2](https://base.org)
 - [MCP Protocol](https://modelcontextprotocol.io)
+- [OpenClaw Agent](https://openclaw.ai) - Example integration
 
 ---
 
