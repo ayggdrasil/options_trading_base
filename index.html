@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Callput Agent MCP - On-Chain Options Trading for AI Agents</title>
+    <title>Options Trading Agent MCP - Autonomous Trading on Callput.app</title>
     <style>
         * {
             margin: 0;
@@ -52,7 +53,7 @@
             transform: translateX(-50%);
             width: 600px;
             height: 600px;
-            background: radial-gradient(circle, rgba(0,82,255,0.1) 0%, transparent 70%);
+            background: radial-gradient(circle, rgba(0, 82, 255, 0.1) 0%, transparent 70%);
             pointer-events: none;
         }
 
@@ -84,7 +85,7 @@
             padding: 8px 16px;
             border-radius: 20px;
             font-size: 0.875rem;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* Section */
@@ -118,9 +119,9 @@
         .flow-item {
             text-align: center;
             padding: 24px;
-            background: rgba(0,82,255,0.05);
+            background: rgba(0, 82, 255, 0.05);
             border-radius: 12px;
-            border: 1px solid rgba(0,82,255,0.2);
+            border: 1px solid rgba(0, 82, 255, 0.2);
             transition: transform 0.3s ease, border-color 0.3s ease;
         }
 
@@ -146,14 +147,14 @@
             background: var(--gray);
             padding: 24px;
             border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             transition: all 0.3s ease;
         }
 
         .strategy-card:hover {
             transform: translateY(-4px);
             border-color: var(--success);
-            box-shadow: 0 8px 24px rgba(0,211,149,0.2);
+            box-shadow: 0 8px 24px rgba(0, 211, 149, 0.2);
         }
 
         .strategy-header {
@@ -175,8 +176,27 @@
             font-weight: 600;
         }
 
-        .type-buy { background: rgba(0,211,149,0.2); color: var(--success); }
-        .type-sell { background: rgba(255,107,157,0.2); color: var(--accent); }
+        .type-debit {
+            background: rgba(0, 211, 149, 0.2);
+            color: var(--success);
+        }
+
+        .type-credit {
+            background: rgba(255, 107, 157, 0.2);
+            color: var(--accent);
+        }
+
+        .payoff-graph {
+            margin-top: 16px;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .payoff-graph svg {
+            width: 100%;
+            height: 120px;
+        }
 
         /* Installation */
         .install-steps {
@@ -210,7 +230,7 @@
         }
 
         code {
-            background: rgba(0,0,0,0.3);
+            background: rgba(0, 0, 0, 0.3);
             padding: 2px 8px;
             border-radius: 4px;
             font-family: 'Monaco', 'Courier New', monospace;
@@ -224,7 +244,7 @@
             border-radius: 8px;
             overflow-x: auto;
             margin-top: 12px;
-            border: 1px solid rgba(0,82,255,0.3);
+            border: 1px solid rgba(0, 82, 255, 0.3);
         }
 
         pre code {
@@ -247,7 +267,7 @@
         }
 
         th {
-            background: rgba(0,82,255,0.1);
+            background: rgba(0, 82, 255, 0.1);
             padding: 16px;
             text-align: left;
             font-weight: 600;
@@ -259,11 +279,11 @@
 
         td {
             padding: 16px;
-            border-top: 1px solid rgba(255,255,255,0.05);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
         }
 
         tbody tr:hover {
-            background: rgba(255,255,255,0.02);
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .loading {
@@ -273,7 +293,7 @@
         }
 
         .spinner {
-            border: 3px solid rgba(255,255,255,0.1);
+            border: 3px solid rgba(255, 255, 255, 0.1);
             border-top-color: var(--primary);
             border-radius: 50%;
             width: 40px;
@@ -283,14 +303,16 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         /* Footer */
         footer {
             text-align: center;
             padding: 60px 0 40px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .footer-links {
@@ -324,22 +346,32 @@
 
         .cta-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 12px 32px rgba(0,82,255,0.3);
+            box-shadow: 0 12px 32px rgba(0, 82, 255, 0.3);
         }
 
         @media (max-width: 768px) {
-            h1 { font-size: 2.5rem; }
-            .flow { grid-template-columns: 1fr; }
-            .strategies { grid-template-columns: 1fr; }
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .flow {
+                grid-template-columns: 1fr;
+            }
+
+            .strategies {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
+
 <body>
     <header>
         <div class="container">
-            <h1>🤖 Callput Agent MCP</h1>
+            <h1>🤖 Options Trading Agent MCP</h1>
             <p class="subtitle">
-                Enable AI agents to trade on-chain options on Base L2. Real-time BTC & ETH options with autonomous execution.
+                Let your AI agents trade autonomously on <strong>callput.app</strong>. Research strategies, analyze
+                markets, and execute profitable trades on Base L2.
             </p>
             <div class="badges">
                 <span class="badge">🔗 Base L2</span>
@@ -359,7 +391,8 @@
             <h2>🔧 How MCP Works</h2>
             <div class="mechanism">
                 <p style="text-align: center; margin-bottom: 24px;">
-                    The Model Context Protocol (MCP) acts as a translator between AI agents and blockchain smart contracts.
+                    The Model Context Protocol (MCP) acts as a translator between AI agents and blockchain smart
+                    contracts.
                 </p>
                 <div class="flow">
                     <div class="flow-item">
@@ -400,80 +433,122 @@
         <div class="container">
             <h2>📊 Available Trading Strategies</h2>
             <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">
-                8 options strategies × 2 assets (BTC, ETH) = 16 trading combinations
+                4 spread strategies × 2 assets (WBTC, WETH) = 8 trading combinations
             </p>
             <div class="strategies">
+                <!-- Debit Call Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Buy Call</span>
-                        <span class="strategy-type type-buy">LONG</span>
+                        <span class="strategy-name">Debit Call Spread</span>
+                        <span class="strategy-type type-debit">DEBIT</span>
                     </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Bullish bet with unlimited upside. Best for strong rallies.
+                    <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
+                        Buy lower strike call, sell higher strike call. Bullish with limited risk & reward.
                     </p>
+                    <p style="font-size: 0.75rem; color: var(--success); margin-bottom: 12px;">
+                        Max Profit: Strike difference - Net debit | Max Loss: Net debit paid
+                    </p>
+                    <div class="payoff-graph">
+                        <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+                            <!-- Axes -->
+                            <line x1="20" y1="60" x2="180" y2="60" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <line x1="20" y1="10" x2="20" y2="110" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <!-- Payoff line -->
+                            <path d="M 20 100 L 80 100 L 140 20 L 180 20" fill="none" stroke="#00D395"
+                                stroke-width="2.5" />
+                            <!-- Labels -->
+                            <text x="75" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K1</text>
+                            <text x="135" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K2</text>
+                            <text x="100" y="50" fill="#00D395" font-size="11" font-weight="600"
+                                text-anchor="middle">Profit ↑</text>
+                        </svg>
+                    </div>
                 </div>
+
+                <!-- Credit Call Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Sell Call</span>
-                        <span class="strategy-type type-sell">SHORT</span>
+                        <span class="strategy-name">Credit Call Spread</span>
+                        <span class="strategy-type type-credit">CREDIT</span>
                     </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Collect premium betting price won't rise above strike.
+                    <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
+                        Sell lower strike call, buy higher strike call. Neutral to bearish income strategy.
                     </p>
+                    <p style="font-size: 0.75rem; color: var(--accent); margin-bottom: 12px;">
+                        Max Profit: Net credit received | Max Loss: Strike difference - Net credit
+                    </p>
+                    <div class="payoff-graph">
+                        <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+                            <line x1="20" y1="60" x2="180" y2="60" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <line x1="20" y1="10" x2="20" y2="110" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <path d="M 20 20 L 80 20 L 140 100 L 180 100" fill="none" stroke="#FF6B9D"
+                                stroke-width="2.5" />
+                            <text x="75" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K1</text>
+                            <text x="135" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K2</text>
+                            <text x="100" y="105" fill="#FF6B9D" font-size="11" font-weight="600"
+                                text-anchor="middle">Loss ↓</text>
+                        </svg>
+                    </div>
                 </div>
+
+                <!-- Debit Put Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Buy Put</span>
-                        <span class="strategy-type type-buy">LONG</span>
+                        <span class="strategy-name">Debit Put Spread</span>
+                        <span class="strategy-type type-debit">DEBIT</span>
                     </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Bearish protection with capped risk. Profits from drops.
+                    <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
+                        Buy higher strike put, sell lower strike put. Bearish with limited risk & reward.
                     </p>
+                    <p style="font-size: 0.75rem; color: var(--success); margin-bottom: 12px;">
+                        Max Profit: Strike difference - Net debit | Max Loss: Net debit paid
+                    </p>
+                    <div class="payoff-graph">
+                        <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+                            <line x1="20" y1="60" x2="180" y2="60" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <line x1="20" y1="10" x2="20" y2="110" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <path d="M 20 20 L 60 20 L 120 100 L 180 100" fill="none" stroke="#00D395"
+                                stroke-width="2.5" />
+                            <text x="55" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K1</text>
+                            <text x="115" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K2</text>
+                            <text x="100" y="30" fill="#00D395" font-size="11" font-weight="600"
+                                text-anchor="middle">Profit ↑</text>
+                        </svg>
+                    </div>
                 </div>
+
+                <!-- Credit Put Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Sell Put</span>
-                        <span class="strategy-type type-sell">SHORT</span>
+                        <span class="strategy-name">Credit Put Spread</span>
+                        <span class="strategy-type type-credit">CREDIT</span>
                     </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Generate income by betting price stays above strike.
+                    <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
+                        Sell higher strike put, buy lower strike put. Neutral to bullish income strategy.
                     </p>
-                </div>
-                <div class="strategy-card">
-                    <div class="strategy-header">
-                        <span class="strategy-name">Buy Call Spread</span>
-                        <span class="strategy-type type-buy">SPREAD</span>
+                    <p style="font-size: 0.75rem; color: var(--accent); margin-bottom: 12px;">
+                        Max Profit: Net credit received | Max Loss: Strike difference - Net credit
+                    </p>
+                    <div class="payoff-graph">
+                        <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+                            <line x1="20" y1="60" x2="180" y2="60" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <line x1="20" y1="10" x2="20" y2="110" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+                            <path d="M 20 100 L 60 100 L 120 20 L 180 20" fill="none" stroke="#FF6B9D"
+                                stroke-width="2.5" />
+                            <text x="55" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K1</text>
+                            <text x="115" y="115" fill="rgba(255,255,255,0.5)" font-size="10"
+                                text-anchor="middle">K2</text>
+                            <text x="100" y="90" fill="#FF6B9D" font-size="11" font-weight="600"
+                                text-anchor="middle">Loss ↓</text>
+                        </svg>
                     </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Limited upside, limited risk. Cheaper than naked calls.
-                    </p>
-                </div>
-                <div class="strategy-card">
-                    <div class="strategy-header">
-                        <span class="strategy-name">Sell Call Spread</span>
-                        <span class="strategy-type type-sell">SPREAD</span>
-                    </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Profit from sideways markets with defined risk.
-                    </p>
-                </div>
-                <div class="strategy-card">
-                    <div class="strategy-header">
-                        <span class="strategy-name">Buy Put Spread</span>
-                        <span class="strategy-type type-buy">SPREAD</span>
-                    </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Bearish play with reduced premium cost.
-                    </p>
-                </div>
-                <div class="strategy-card">
-                    <div class="strategy-header">
-                        <span class="strategy-name">Sell Put Spread</span>
-                        <span class="strategy-type type-sell">SPREAD</span>
-                    </div>
-                    <p style="font-size: 0.875rem; color: var(--text-dim);">
-                        Neutral strategy collecting premium with safety net.
-                    </p>
                 </div>
             </div>
         </div>
@@ -505,11 +580,29 @@ cd options_trading_base</code></pre>
                     </p>
                 </div>
                 <div class="install-step">
+                    <h3>Fund Your Agent's Wallet</h3>
+                    <p style="margin-bottom: 12px;">Create a Base wallet and fund it:</p>
+                    <pre><code># 1. Create new wallet (save the private key!)
+# 2. Bridge ETH to Base L2 (for gas fees)
+# 3. Bridge USDC to Base L2 (for trading)
+# 4. Add to your agent's .env file:
+PRIVATE_KEY=0x1234567890abcdef...
+RPC_URL=https://mainnet.base.org</code></pre>
+                    <p style="margin-top: 12px; font-size: 0.875rem; color: var(--warning);">
+                        ⚠️ Keep private keys secure. Never commit .env files to git.
+                    </p>
+                </div>
+                <div class="install-step">
                     <h3>Integrate with Your Agent</h3>
                     <p style="margin-bottom: 12px;">Add MCP client to your bot:</p>
                     <pre><code>import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 const client = new Client({...});
-await client.connect(transport);</code></pre>
+await client.connect(transport);
+
+// Your agent can now:
+// 1. Query options: client.callTool("get_option_chains", {...);
+// 2. Get quotes: client.callTool("request_quote", {...);
+// 3. Sign & broadcast transactions with wallet</code></pre>
                 </div>
             </div>
         </div>
@@ -601,9 +694,10 @@ await client.connect(transport);</code></pre>
 
         // Load trades on page load
         loadRecentTrades();
-        
+
         // Refresh every 30 seconds
         setInterval(loadRecentTrades, 30000);
     </script>
 </body>
+
 </html>
