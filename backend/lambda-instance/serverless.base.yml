@@ -1,0 +1,507 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: app-lambda-base
+# app and org for use with dashboard.serverless.com
+#app: your-app-name
+#org: your-org-name
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  role: arn:aws:iam::836686979053:role/lambda-with-critical-policy
+  runtime: nodejs18.x
+  memorySize: 1024
+  timeout: 60
+  environment:
+    SECRET_PATH: ${self:custom.secretPath.${self:provider.stage}}
+
+    # NODE_OPTIONS: --enable-source-maps
+    CHAIN_ID: 8453
+
+    # REGION
+    APP_DATA_REGION: "ap-southeast-1"
+
+    # COMMON DATA
+    APP_GLOBAL_DATA_BUCKET: "app-data-base"
+    
+    APP_GLOBAL_DATA_FUTURES_KEY: futures.json
+    APP_GLOBAL_DATA_FUTURES_DAILY_KEY: futures-daily/futures-daily
+    APP_GLOBAL_DATA_SPOT_KEY: spot.json
+    APP_GLOBAL_DATA_SPOT_DAILY_KEY: spot-daily/spot-daily
+    APP_GLOBAL_DATA_SETTLE_PRICE_KEY: settle-prices.json
+    APP_GLOBAL_DATA_RISK_FREE_RATES_KEY: risk-free-rates.json
+    APP_GLOBAL_GEO_LITE_COUNTRY_DATA_KEY: GeoLite2-Country.mmdb
+    APP_GLOBAL_DATA_BINANCE_KLINE_KEY: klines-data/binance
+
+    # MAIN NETWORK SPECIFIC
+    APP_DATA_BUCKET: "app-data-base"
+
+    APP_DATA_MARKET_DATA_KEY: market-data.json
+    APP_DATA_INSTRUMENTS_KEY: instruments.json
+    APP_DATA_INSTRUMENTS_HASH_KEY: instruments-hash.json
+    APP_DATA_SETTLE_CHECK_KEY: settle-check.json
+    APP_DATA_TRADE_DATA_KEY: trade-data.json
+    APP_DATA_OLPPV_KEY: olppv.json
+    APP_DATA_OLP_DASHBOARD_KEY: olp-dashboard.json
+
+    APP_DATA_MARKET_DAILY_KEY: market-daily/market-daily
+    APP_DATA_IV_CURVE_DAILY_KEY: iv-curve-daily/iv-curve-daily
+    APP_DATA_OLP_STATS_DAILY_KEY: olp-stats-daily/olp-stats-daily
+
+    DUNE_DATA_BUCKET: dune-data-base
+
+    # max
+    MAX_RUNNING_TIME_FOR_PARALLEL_TASK: 59 # 59s
+    MAX_RETRIES: 3
+
+# you can overwrite defaults here
+  stage: prod
+  region: ap-southeast-1
+
+# you can add statements to the Lambda function's IAM Role here
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "s3:GetObject"
+            - "s3:PutObject"
+          Resource:
+            Fn::Join:
+              - ""
+              - - "arn:aws:s3:::"
+                - "app-data-base"
+                - "/*"
+        - Effect: "Allow"
+          Action:
+            - "s3:GetObject"
+            - "s3:PutObject"
+          Resource:
+            Fn::Join:
+              - ""
+              - - "arn:aws:s3:::"
+                - "dune-data-base"
+                - "/*"
+        - Effect: "Allow"
+          Action:
+            - "execute-api:ManageConnections"
+          Resource:
+            Fn::Join:
+              - ""
+              - - "arn:aws:execute-api:"
+                - ${self:provider.region}
+                - ":*:"
+                - "*"
+                - "/@connections/*" 
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+custom:
+  secretPath:
+    dev: /dev/base
+    prod: /prod/base
+  esbuild:
+    bundle: true
+    minify: false
+    format: cjs
+    target: node18
+    external:
+      - '@aws-sdk/*'
+    # sourcemap: external
+  # webpack:
+  #   webpackConfig: 'webpack.config.js' # Name of webpack configuration file
+  #   includeModules: false # Node modules configuration for packaging
+  #   packager: 'npm' # Packager that will be used to package your external modules
+
+# you can add packaging information here
+# package:
+#  patterns:
+#    - dist/**
+#    - node_modules/**
+
+functions:
+  # Global Process
+  processUpdateMarketIndexParallel:
+    handler: handler.processUpdateMarketIndexParallel
+    memorySize: 2048
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-update-market-index-parallel
+          description: ''
+          rate: rate(1 minute)
+  processUpdateMarketIndexDaily:
+    handler: handler.processUpdateMarketIndexDaily
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-update-market-index-daily
+          description: ''
+          rate: cron(0-5 0 * * ? *)
+  processFeedKlineDataParallel:
+    handler: handler.processFeedKlineDataParallel
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-feed-kline-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  processFeedRiskFreeRates:
+    handler: handler.processFeedRiskFreeRates
+    events:
+      - schedule:
+          name: process-feed-risk-free-rates
+          description: ''
+          rate: rate(1 hour)
+  processFeedTwapPrice:
+    handler: handler.processFeedTwapPrice
+    memorySize: 2048
+    events:
+      - schedule:
+          name: feed-twap-price
+          description: ''
+          rate: cron(0-5 8 * * ? *)
+  # Process Parallel
+  processExecutePositionRequestParallel:
+    handler: handler.processExecutePositionRequestParallel
+    memorySize: 2048
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-execute-position-request-parallel
+          description: ''
+          rate: rate(1 minute)
+  processCollectMarketDataParallel:
+    handler: handler.processCollectMarketDataParallel
+    memorySize: 2048
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-collect-market-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  processCollectTradeDataParallel:
+    handler: handler.processCollectTradeDataParallel
+    memorySize: 2048
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-collect-trade-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  processUpdateOlppvParallel:
+    handler: handler.processUpdateOlppvParallel
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-update-olppv-parallel
+          description: ''
+          rate: rate(1 minute)
+  processFeedOnchainDataParallel:
+    handler: handler.processFeedOnchainDataParallel
+    reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-feed-onchain-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  # Process Single
+  processUpdateDaily:
+    handler: handler.processUpdateDaily
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-update-daily
+          description: ''
+          rate: cron(0-5 0 * * ? *)
+  processNotifyTradeData:
+    handler: handler.processNotifyTradeData
+    events:
+      - schedule:
+          name: process-notify-trade-data
+          description: ''
+          rate: cron(0 8 * * ? *)
+  processNotifyPositions:
+    handler: handler.processNotifyPositions
+    events:
+      - schedule:
+          name: process-notify-positions
+          description: ''
+          rate: rate(1 minute)
+  processCheckAvailableAmounts:
+    handler: handler.processCheckAvailableAmounts
+    events:
+      - schedule:
+          name: process-check-available-amounts
+          description: ''
+          rate: cron(0 0/4 * * ? *)
+  processCheckMarketChange:
+    handler: handler.processCheckMarketChange
+    events:
+      - schedule:
+          name: process-check-market-change
+          description: ''
+          rate: rate(5 minutes)
+  processCheckKeeperBalances:
+    handler: handler.processCheckKeeperBalances
+    events:
+      - schedule:
+          name: process-check-keeper-balances
+          description: ''
+          rate: rate(30 minutes)
+  processCheckFeedUpdates:
+    handler: handler.processCheckFeedUpdates
+    events:
+      - schedule:
+          name: process-check-feed-updates
+          description: ''
+          rate: rate(1 minute)
+  processCheckFileUpdates:
+    handler: handler.processCheckFileUpdates
+    events:
+      - schedule:
+          name: process-check-file-updates
+          description: ''
+          rate: rate(1 minute)
+  processCollectOlpStats:
+    handler: handler.processCollectOlpStats
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-collect-olp-stats
+          description: ''
+          rate: rate(1 minute)
+  processCollectMarketDaily:
+    handler: handler.processCollectMarketDaily
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-collect-market-daily
+          description: ''
+          rate: cron(0-10 0 * * ? *)
+  processDetectPriceVolatility:
+    handler: handler.processDetectPriceVolatility
+    events:
+      - schedule:
+          name: process-detect-price-volatility
+          description: ''
+          rate: rate(1 minute)
+  processFeedInstruments:
+    handler: handler.processFeedInstruments
+    events:
+      - schedule:
+          name: process-feed-instruments-1
+          description: ''
+          rate: cron(5,20,35,50 8-23 * * ? *)
+      - schedule:
+          name: process-feed-instruments-2
+          description: ''
+          rate: cron(5,20,35,50 0-7 * * ? *)
+  processUpdateOptionsMarket:
+    handler: handler.processUpdateOptionsMarket
+    events:
+      - schedule:
+          name: process-update-options-market
+          description: ''
+          rate: rate(1 hour)
+  processDistributeFee:
+    handler: handler.processDistributeFee
+    events:
+      - schedule:
+          name: process-distribute-fee
+          description: ''
+          rate: cron(0 0 * * ? *)
+  # processDistributeReward:
+  #   handler: handler.processDistributeReward
+  #   events:
+  #     - schedule:
+  #         name: process-distribute-reward
+  #         description: ''
+  #         rate: rate(1 minute)
+  processClearPositions:
+    handler: handler.processClearPositions
+    events:
+      - schedule:
+          name: process-clear-positions
+          description: ''
+          rate: rate(10 minutes)
+  processFeedSettlePrice:
+    handler: handler.processFeedSettlePrice
+    events:
+      - schedule:
+          name: feed-settle-price-new
+          description: ''
+          rate: cron(2-7 8 * * ? *)
+  processExecuteVaultSettlement:
+    handler: handler.processExecuteVaultSettlement
+    events:
+      - schedule:
+          name: execute-vault-settlement-new
+          description: ''
+          rate: cron(5-30 8 * * ? *)
+  applyOLPDepositPoints:
+    handler: handler.applyOLPDepositPoints
+    events:
+      - schedule:
+          name: apply-olp-deposit-points
+          description: ''
+          rate: cron(0 0 * * ? *)
+  applyWeeklyRewardPoints:
+    handler: handler.applyWeeklyRewardPoints
+    events:
+      - schedule:
+          name: apply-weekly-reward-points
+          description: ''
+          rate: cron(0 0 ? * MON *)
+  query:
+    handler: handler.query
+  getKlines:
+    handler: handler.getKlines
+    events:
+      - http:
+          path: /getKlines
+          method: get
+          cors: true
+  getVolumeData:
+    handler: handler.getVolumeData
+    events:
+      - http:
+          path: /getVolumeData
+          method: get
+          cors: true
+  getRevenue:
+    handler: handler.getRevenue
+    events:
+      - http:
+          path: /getRevenue
+          method: get
+          cors: true
+  getProtocolNetRevenue:
+    handler: handler.getProtocolNetRevenue
+    events:
+      - http:
+          path: /getProtocolNetRevenue
+          method: get
+          cors: true
+  getTwitterInfo:
+    handler: handler.getTwitterInfo
+    events:
+      - http:
+          path: /getTwitterInfo
+          method: post
+          cors: true
+  connectTwitter:
+    handler: handler.connectTwitter
+    events:
+      - http:
+          path: /connectTwitter
+          method: get
+          cors: true
+  removeTwitter:
+    handler: handler.removeTwitter
+    events:
+      - http:
+          path: /removeTwitter
+          method: get
+          cors: true
+  twitterCallback:
+    handler: handler.twitterCallback
+    events:
+      - http:
+          path: /twitterCallback
+          method: get
+          cors: true
+  demo:
+    handler: handler.demo
+  isRestrictedCountry:
+    handler: handler.isRestrictedCountry
+    events:
+      - http:
+          path: /isRestrictedCountry
+          method: get
+          cors: true
+  processConnectWebSocket:
+    handler: handler.processConnectWebSocket
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+  updateOlpPoolDashboardData:
+    handler: handler.updateOlpPoolDashboardData
+    events:
+      - schedule: 
+          name: update-olp-pool-dashboard-data
+          description: ''
+          rate: rate(6 hours)
+  # S Vault Epoch Management - Automatically manages epoch transitions
+  processSVaultManageEpoch:
+    handler: handler.processSVaultManageEpoch
+    description: "Manage S Vault Epoch automatically (start/end based on S3 config time)"
+    events:
+      - schedule:
+          name: s-vault-manage-epoch-1min
+          description: "Check and manage S Vault Epoch every minute"
+          rate: rate(1 minute)
+          enabled: true
+  
+  # Process OLP Queue during PROCESS phase
+  processSVaultExecuteOlpQueueParallel:
+    handler: handler.processSVaultExecuteOlpQueueParallel
+    reservedConcurrency: 1
+    memorySize: 2048
+    description: "Execute S Vault OLP Queue in parallel during Process phase"
+    events:
+      - schedule:
+          name: s-vault-queue-process-1min
+          description: "Process S Vault OLP Queue every minute (only during PROCESS stage)"
+          rate: rate(1 minute)
+          enabled: true
+  
+  # Feed OLPPV during SUBMISSION phase
+  processSVaultFeedOlppvSubmission:
+    handler: handler.processSVaultFeedOlppvSubmission
+    description: "Feed OLPPV during SUBMISSION phase only"
+    events:
+      - schedule:
+          name: s-vault-feed-olppv-submission-3min
+          description: "Feed S Vault OLPPV at 2,5,8,11,14,17,20,23,26,29,32,35,38,41,44,47,50,53,56,59 minutes (only during SUBMISSION stage)"
+          rate: cron(2,5,8,11,14,17,20,23,26,29,32,35,38,41,44,47,50,53,56,59 * * * ? *)
+          enabled: true
+  
+  # Admin function to update epoch config (auto-initializes if file doesn't exist)
+  processUpdateEpochConfig:
+    handler: handler.processUpdateEpochConfig
+    description: "Update epoch config (requires vaultType, submissionDurationMinutes, processDurationMinutes)"
+  
+  # Frontend API to get epoch info
+  getEpochInfo:
+    handler: handler.getEpochInfo
+    description: "Get current epoch info for frontend"
+    events:
+      - http:
+          path: /getEpochInfo
+          method: get
+          cors: true
+
+plugins:
+  - serverless-functions-base-path
+  # - serverless-webpack
+  - serverless-esbuild
+  - serverless-offline

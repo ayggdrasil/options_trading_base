@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+<mask id="mask0_1940_3691" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M16 32C24.8366 32 32 24.8366 32 16C32 7.16344 24.8366 0 16 0C7.16344 0 0 7.16344 0 16C0 24.8366 7.16344 32 16 32ZM16 28C22.6274 28 28 22.6274 28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28Z" fill="#CB202D"/>
+</mask>
+<g mask="url(#mask0_1940_3691)">
+<g clip-path="url(#paint0_angular_1940_3691_clip_path)" data-figma-skip-parse="true"><g transform="matrix(0 0.0177399 -0.0177399 0 15.9996 16.0004)"><foreignObject x="-1056.37" y="-1056.37" width="2112.74" height="2112.74"><div xmlns="http://www.w3.org/1999/xhtml" style="background:conic-gradient(from 90deg,rgba(230, 252, 141, 1) 0deg,rgba(230, 252, 141, 0) 360deg);height:100%;width:100%;opacity:1"></div></foreignObject></g></g><rect x="-1.74023" y="-1.7395" width="35.4797" height="35.4797" data-figma-gradient-fill="{&quot;type&quot;:&quot;GRADIENT_ANGULAR&quot;,&quot;stops&quot;:[{&quot;color&quot;:{&quot;r&quot;:0.90196079015731812,&quot;g&quot;:0.98823529481887817,&quot;b&quot;:0.55294120311737061,&quot;a&quot;:1.0},&quot;position&quot;:0.0},{&quot;color&quot;:{&quot;r&quot;:0.90196079015731812,&quot;g&quot;:0.98823529481887817,&quot;b&quot;:0.55294120311737061,&quot;a&quot;:0.0},&quot;position&quot;:1.0}],&quot;stopsVar&quot;:[{&quot;color&quot;:{&quot;r&quot;:0.90196079015731812,&quot;g&quot;:0.98823529481887817,&quot;b&quot;:0.55294120311737061,&quot;a&quot;:1.0},&quot;position&quot;:0.0},{&quot;color&quot;:{&quot;r&quot;:0.90196079015731812,&quot;g&quot;:0.98823529481887817,&quot;b&quot;:0.55294120311737061,&quot;a&quot;:0.0},&quot;position&quot;:1.0}],&quot;transform&quot;:{&quot;m00&quot;:2.1725077960839823e-15,&quot;m01&quot;:-35.479743957519531,&quot;m02&quot;:33.739509582519531,&quot;m10&quot;:35.479743957519531,&quot;m11&quot;:2.1725077960839823e-15,&quot;m12&quot;:-1.7395019531250},&quot;opacity&quot;:1.0,&quot;blendMode&quot;:&quot;NORMAL&quot;,&quot;visible&quot;:true}"/>
+<circle cx="16" cy="30" r="2" fill="#E6FC8D"/>
+</g>
+<defs>
+<clipPath id="paint0_angular_1940_3691_clip_path"><rect x="-1.74023" y="-1.7395" width="35.4797" height="35.4797"/></clipPath></defs>
+</svg>

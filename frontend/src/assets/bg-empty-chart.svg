@@ -1,0 +1,26 @@
+<svg width="672" height="264" viewBox="0 0 672 264" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient x1="0%" y1="58.557%" x2="100%" y2="58.557%" id="4s773z3rwa">
+            <stop stop-color="#1F1F1F" stop-opacity=".98" offset="0%"/>
+            <stop stop-color="#1F1F1F" stop-opacity=".6" offset="16.111%"/>
+            <stop stop-color="#1F1F1F" stop-opacity="0" offset="50.083%"/>
+            <stop stop-color="#1F1F1F" stop-opacity=".6" offset="74.055%"/>
+            <stop stop-color="#1F1F1F" stop-opacity=".98" offset="100%"/>
+        </linearGradient>
+    </defs>
+    <g fill="none" fill-rule="evenodd">
+        <rect fill="#1F1F1F" width="672" height="264" rx="2"/>
+        <g stroke="#2E2E2E" stroke-dasharray="2,3" stroke-linecap="square">
+            <path d="M0 8.5h672M0 48.5h672M0 88.5h672M0 128.5h672M0 168.5h672M0 208h672M0 248.5h672"/>
+        </g>
+        <g fill="#2E2E2E" fill-rule="nonzero">
+            <path d="M239.569 79.75a1.99 1.99 0 0 1 0 3.98c-15.816 0-32.297 5.6-49.419 16.823L1.73 228.457c-.904.624-1.377.764-1.519.497-.141-.266.019-.507.923-1.13L187.93 97.25c17.773-11.65 34.991-17.501 51.64-17.501z"/>
+            <path d="M239.196 79.75a1.99 1.99 0 1 0 0 3.98c15.816 0 32.297 5.6 49.419 16.823l46.755 32.271a1.99 1.99 0 1 0 2.26-3.275l-46.794-32.298c-17.772-11.65-34.99-17.501-51.64-17.501z"/>
+            <g>
+                <path d="M433.431 182.25a1.99 1.99 0 0 1 0-3.98c15.816 0 32.297-5.6 49.419-16.823L670.676 33.583c.546-.334.829-.553 1.024-.337.195.215-.033.443-.749.974l-185.88 130.529c-17.773 11.65-34.991 17.501-51.64 17.501z"/>
+                <path d="M433.804 182.25a1.99 1.99 0 1 0 0-3.98c-15.816 0-32.297-5.6-49.428-16.829l-46.755-31.898a1.99 1.99 0 1 0-2.242 3.287l46.785 31.919c17.772 11.65 34.99 17.501 51.64 17.501z"/>
+            </g>
+        </g>
+        <rect fill="url(#4s773z3rwa)" width="672" height="264" rx="2"/>
+    </g>
+</svg>

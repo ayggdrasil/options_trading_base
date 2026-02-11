@@ -1,0 +1,17 @@
+[profile.default]
+eth_rpc_url = "https://arb1.arbitrum.io/rpc"
+#eth_rpc_url = "https://base-mainnet.infura.io"
+optimizer = true
+opt_level = "1"
+out = "out"
+script = "script"
+solc = "0.8.16"
+test = "test/foundry/Testbed"
+src = 'contracts'
+libs = ["lib"]
+
+remappings = [
+    "@openzeppelin/=node_modules/@openzeppelin/"
+]
+
+viaIR=true

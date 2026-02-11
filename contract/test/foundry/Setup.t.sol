@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.16;
+
+import {Test, console} from "forge-std/Test.sol";
+import {MockERC20} from "../../lib/forge-std/src/mocks/MockERC20.sol";
+import {AddressBook} from "./AddressBook.sol";
+import {OptionsAuthority} from "../../contracts/OptionsAuthority.sol";
+import {VaultPriceFeed} from "../../contracts/oracles/VaultPriceFeed.sol";
+import {OptionsMarket} from "../../contracts/OptionsMarket.sol";
+import {Vault} from "../../contracts/Vault.sol";
+import {VaultUtils} from "../../contracts/VaultUtils.sol";
+import {USDG} from "../../contracts/tokens/USDG.sol";
+import {OLP} from "../../contracts/tokens/OLP.sol";
+import {OlpManager} from "../../contracts/OlpManager.sol";
+import {RewardTracker} from "../../contracts/staking/RewardTracker.sol";
+import {RewardDistributor} from "../../contracts/staking/RewardDistributor.sol";
+import {RewardRouterV2} from "../../contracts/staking/RewardRouterV2.sol";
+import {Controller} from "../../contracts/Controller.sol";
+import {PositionManager} from "../../contracts/PositionManager.sol";
+import {SettleManager} from "../../contracts/SettleManager.sol";
+import {FeeDistributor} from "../../contracts/peripherals/FeeDistributor.sol";
+import {OptionsToken} from "../../contracts/tokens/OptionsToken.sol";
+import {FastPriceEvents} from "../../contracts/oracles/FastPriceEvents.sol";
+import {FastPriceFeed} from "../../contracts/oracles/FastPriceFeed.sol";
+import {PositionValueFeed} from "../../contracts/oracles/PositionValueFeed.sol";
+import {SettlePriceFeed} from "../../contracts/oracles/SettlePriceFeed.sol";
+import {SpotPriceFeed} from "../../contracts/oracles/SpotPriceFeed.sol";
+import {ViewAggregator} from "../../contracts/ViewAggregator.sol";
+import {Referral} from "../../contracts/peripherals/Referral.sol";
+import {ProxyAdmin} from "../../lib/openzeppelin-contracts/contracts/proxy/transparent/ProxyAdmin.sol";
+import {ArbitrumPrimaryOracle} from "../../contracts/oracles/chains/ArbitrumPrimaryOracle.sol";
+
+contract Setup is Test, AddressBook {
+    address public deployer;
+    address public user;
+
+    address KP_POSITION_PROCESSOR;
+    address KP_PV_FEEDER_1;
+    address KP_PV_FEEDER_2;
+    address KP_SPOT_FEEDER_1;
+    address KP_SPOT_FEEDER_2;
+    address KP_FEE_DISTRIBUTOR;
+    address KP_CLEARING_HOUSE;
+    address KP_SETTLE_OPERATOR;
+
+    ProxyAdmin public proxyAdmin;
+    address public SAFE_DEPLOYER;
+    MockERC20 public wbtc;
+    MockERC20 public weth;
+    MockERC20 public usdc;
+    OptionsAuthority public optionsAuthority;
+    VaultPriceFeed public vaultPriceFeed;
+    OptionsMarket public optionsMarket;
+    Vault public sVault;
+    Vault public mVault;
+    Vault public lVault;
+    VaultUtils public sVaultUtils;
+    VaultUtils public mVaultUtils;
+    VaultUtils public lVaultUtils;
+    USDG public sUSDG;
+    USDG public mUSDG;
+    USDG public lUSDG;
+    OLP public sOlp;
+    OLP public mOlp;
+    OLP public lOlp;
+    OlpManager public sOlpManager;
+    OlpManager public mOlpManager;
+    OlpManager public lOlpManager;
+    RewardDistributor public sRewardDistributor;
+    RewardDistributor public mRewardDistributor;
+    RewardDistributor public lRewardDistributor;
+		RewardTracker public sRewardTracker;
+    RewardTracker public mRewardTracker;
+    RewardTracker public lRewardTracker;
+    RewardRouterV2 public sRewardRouterV2;
+    RewardRouterV2 public mRewardRouterV2;
+    RewardRouterV2 public lRewardRouterV2;
+    Controller public controller;
+    PositionManager public positionManager;
+    SettleManager public settleManager;
+    FeeDistributor public feeDistributor;
+    OptionsToken public btcOptionsToken;
+    OptionsToken public ethOptionsToken;
+    FastPriceEvents public fastPriceEvents;
+    FastPriceFeed public fastPriceFeed;
+    PositionValueFeed public positionValueFeed;
+    SettlePriceFeed public settlePriceFeed;
+    SpotPriceFeed public spotPriceFeed;
+    ViewAggregator public viewAggregator;
+    Referral public referral;
+    ArbitrumPrimaryOracle public primaryOracle;
+
+
+
+    function setUp() public {
+        AddressBook.AddressSet memory addressSet = AddressBook.getAddressBook("ARBITRUM_ONE");
+
+        deployer = addressSet.DEPLOYER;
+        user = address(0x1234);
+        SAFE_DEPLOYER = addressSet.SAFE_DEPLOYER;
+        proxyAdmin = ProxyAdmin(addressSet.PROXY_ADMIN);
+        wbtc = MockERC20(addressSet.WBTC);
+        weth = MockERC20(addressSet.WETH);
+        usdc = MockERC20(addressSet.USDC);
+        optionsAuthority = OptionsAuthority(addressSet.OPTIONS_AUTHORITY);
+        vaultPriceFeed = VaultPriceFeed(addressSet.VAULT_PRICE_FEED);
+        optionsMarket = OptionsMarket(addressSet.OPTIONS_MARKET);
+        sVault = Vault(addressSet.S_VAULT);
+        mVault = Vault(addressSet.M_VAULT);
+        lVault = Vault(addressSet.L_VAULT);
+        sVaultUtils = VaultUtils(addressSet.S_VAULT_UTILS);
+        mVaultUtils = VaultUtils(addressSet.M_VAULT_UTILS);
+        lVaultUtils = VaultUtils(addressSet.L_VAULT_UTILS);
+        sRewardTracker = RewardTracker(addressSet.S_REWARD_TRACKER);
+        mRewardTracker = RewardTracker(addressSet.M_REWARD_TRACKER);
+        lRewardTracker = RewardTracker(addressSet.L_REWARD_TRACKER);
+        sUSDG = USDG(addressSet.S_USDG);
+        mUSDG = USDG(addressSet.M_USDG);
+        lUSDG = USDG(addressSet.L_USDG);
+        sOlp = OLP(addressSet.S_OLP);
+        mOlp = OLP(addressSet.M_OLP);
+        lOlp = OLP(addressSet.L_OLP);
+        sOlpManager = OlpManager(addressSet.S_OLP_MANAGER);
+        mOlpManager = OlpManager(addressSet.M_OLP_MANAGER);
+        lOlpManager = OlpManager(addressSet.L_OLP_MANAGER);
+        sRewardDistributor = RewardDistributor(addressSet.S_REWARD_DISTRIBUTOR);
+        mRewardDistributor = RewardDistributor(addressSet.M_REWARD_DISTRIBUTOR);
+        lRewardDistributor = RewardDistributor(addressSet.L_REWARD_DISTRIBUTOR);
+        sRewardRouterV2 = RewardRouterV2(payable(addressSet.S_REWARD_ROUTER_V2));
+        mRewardRouterV2 = RewardRouterV2(payable(addressSet.M_REWARD_ROUTER_V2));
+        lRewardRouterV2 = RewardRouterV2(payable(addressSet.L_REWARD_ROUTER_V2));
+        controller = Controller(payable(addressSet.CONTROLLER));
+        positionManager = PositionManager(payable(addressSet.POSITION_MANAGER));
+        settleManager = SettleManager(payable(addressSet.SETTLE_MANAGER));
+        feeDistributor = FeeDistributor(addressSet.FEE_DISTRIBUTOR);
+        btcOptionsToken = OptionsToken(addressSet.BTC_OPTIONS_TOKEN);
+        ethOptionsToken = OptionsToken(addressSet.ETH_OPTIONS_TOKEN);
+        fastPriceEvents = FastPriceEvents(addressSet.FAST_PRICE_EVENTS);
+        fastPriceFeed = FastPriceFeed(addressSet.FAST_PRICE_FEED);
+        positionValueFeed = PositionValueFeed(addressSet.POSITION_VALUE_FEED);
+        settlePriceFeed = SettlePriceFeed(addressSet.SETTLE_PRICE_FEED);
+        spotPriceFeed = SpotPriceFeed(addressSet.SPOT_PRICE_FEED);
+        viewAggregator = ViewAggregator(addressSet.VIEW_AGGREGATOR);
+        referral = Referral(payable(addressSet.REFERRAL));
+        primaryOracle = ArbitrumPrimaryOracle(addressSet.PRIMARY_ORACLE);
+
+        KP_POSITION_PROCESSOR = address(addressSet.KP_POSITION_PROCESSOR);
+        KP_PV_FEEDER_1 = address(addressSet.KP_PV_FEEDER_1);
+        KP_PV_FEEDER_2 = address(addressSet.KP_PV_FEEDER_2);
+        KP_SPOT_FEEDER_1 = address(addressSet.KP_SPOT_FEEDER_1);
+        KP_SPOT_FEEDER_2 = address(addressSet.KP_SPOT_FEEDER_2);
+        KP_FEE_DISTRIBUTOR = address(addressSet.KP_FEE_DISTRIBUTOR);
+        KP_CLEARING_HOUSE = address(addressSet.KP_CLEARING_HOUSE);
+        KP_SETTLE_OPERATOR = address(addressSet.KP_SETTLE_OPERATOR);
+    }
+}

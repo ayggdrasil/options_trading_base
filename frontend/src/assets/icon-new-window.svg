@@ -1,0 +1,9 @@
+<svg width="18.115" height="18.14" viewBox="0 0 18.115 18.14" xmlns="http://www.w3.org/2000/svg">
+    <g fill="#E0E0E0" fill-rule="evenodd">
+        <path d="M15.443 3.585v4.6a.9.9 0 1 1-1.8 0V5.911l-4.764 4.765a1 1 0 0 1-1.327.077l-.088-.077a1 1 0 0 1 0-1.415l4.788-4.789H9.93a.9.9 0 0 1-.891-.777l-.009-.122a.9.9 0 0 1 .9-.9h4.6c.252 0 .48.103.643.27.166.163.27.39.27.642z"/>
+        <rect transform="rotate(90 4.5 5.113)" x="3.5" y="2.613" width="2" height="5" rx="1"/>
+        <rect transform="rotate(90 13 13.613)" x="10.5" y="12.613" width="5" height="2" rx="1"/>
+        <rect transform="rotate(90 8 15.14)" x="7" y="9.14" width="2" height="12" rx="1"/>
+        <rect transform="rotate(90 3 10.113)" x="-3" y="9.113" width="12" height="2" rx="1"/>
+    </g>
+</svg>

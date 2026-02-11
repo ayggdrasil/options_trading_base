@@ -1,0 +1,31 @@
+<svg width="400" height="791" viewBox="0 0 400 791" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="4k0n4a8r2a">
+            <stop stop-color="#1A1A1A" stop-opacity="0" offset="0%"/>
+            <stop stop-color="#1A1A1A" offset="100%"/>
+        </linearGradient>
+    </defs>
+    <g fill="none" fill-rule="evenodd">
+        <g transform="translate(28 32)" fill="#212121">
+            <rect width="344" height="107" rx="6" transform="translate(0 175)"/>
+            <rect y="71" width="344" height="54" rx="4"/>
+            <rect y="145" width="96" height="18" rx="4"/>
+            <rect width="200" height="24" rx="4"/>
+            <rect y="28" width="136" height="19" rx="4"/>
+        </g>
+        <g transform="translate(28 450)" fill="#212121">
+            <rect y="211" width="81" height="18" rx="4"/>
+            <rect x="284" y="211" width="60" height="18" rx="4"/>
+            <rect x="284" y="299" width="60" height="18" rx="4"/>
+            <rect x="263" y="277" width="81" height="18" rx="4"/>
+            <rect x="296" y="233" width="48" height="18" rx="4"/>
+            <rect x="320" y="255" width="24" height="18" rx="4"/>
+            <rect y="233" width="72" height="18" rx="4"/>
+            <rect y="277" width="72" height="18" rx="4"/>
+            <rect y="255" width="48" height="18" rx="4"/>
+            <rect y="299" width="36" height="18" rx="4"/>
+            <rect width="344" height="192" rx="4"/>
+        </g>
+        <path d="M4 0h392a4 4 0 0 1 4 4v783a4 4 0 0 1-4 4H4a4 4 0 0 1-4-4V4a4 4 0 0 1 4-4z" fill="url(#4k0n4a8r2a)"/>
+    </g>
+</svg>

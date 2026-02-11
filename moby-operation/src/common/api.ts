@@ -1,0 +1,2 @@
+export const SETTLE_PRICES_S3_URL = "https://moby-arb-data.s3.ap-northeast-2.amazonaws.com/settle-prices.json";
+export const SPOT_INDICES_S3_URL = "https://moby-arb-data.s3.ap-northeast-2.amazonaws.com/spot-indices.json";

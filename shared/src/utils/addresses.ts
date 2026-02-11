@@ -1,0 +1,1 @@
+export const isSameAddress = (a: string, b: string) => String(a).toLowerCase() === String(b).toLowerCase()

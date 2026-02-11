@@ -1,0 +1,14 @@
+{
+  "trading": {
+    "description": "Trading Page."
+  },
+  "pools": {
+    "description": "Pools Page."
+  },
+  "dashboard": {
+    "description": "Dashboard Page."
+  },
+  "position-manager": {
+    "description": "Position Manager Page."
+  }
+}

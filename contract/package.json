@@ -1,0 +1,34 @@
+{
+  "name": "options-protocol-contract",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/hardhat-upgrades": "^2.0.0",
+    "@safe-global/sdk-starter-kit": "^3.0.0",
+    "@types/ejs": "^3.1.4",
+    "crypto": "^1.0.1",
+    "ethers": "^6.6.2",
+    "hardhat": "^2.14.1",
+    "hardhat-contract-sizer": "^2.10.0",
+    "semver": "^7.6.3",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.726.1",
+    "@openzeppelin/contracts": "^4.8.3",
+    "bignumber.js": "^9.1.2",
+    "bn.js": "^5.2.1",
+    "dotenv": "^16.1.4",
+    "ejs": "^3.1.9",
+    "graphql-request": "^6.1.0",
+    "keccak256": "^1.0.6"
+  }
+}

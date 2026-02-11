@@ -1,0 +1,35 @@
+export const MONTHS_MAP: { [key: number]: string } = {
+  1: 'JAN',
+  2: 'FEB',
+  3: 'MAR',
+  4: 'APR',
+  5: 'MAY',
+  6: 'JUN',
+  7: 'JUL',
+  8: 'AUG',
+  9: 'SEP',
+  10: 'OCT',
+  11: 'NOV',
+  12: 'DEC',
+};
+
+export const MONTHS_MAP_REV: { [key: string]: number } = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12,
+};
+
+export const EVERY_20_SECONDS = '*/20 * * * * *';
+export const EVERY_15_SECONDS = '*/15 * * * * *';
+export const EVERY_10_30_50_SECONDS = '10,30,50 * * * * *';
+export const EVERY_0_15_30_45_SECONDS = '0,15,30,45 * * * * *';
+export const EVERY_5_20_35_50_SECONDS = '5,20,35,50 * * * * *';

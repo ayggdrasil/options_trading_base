@@ -1,0 +1,209 @@
+# OLP Epoch Management - Example Configuration
+# S3 기반 동적 설정으로 재배포 없이 epoch 주기 변경 가능
+
+service: app-lambda-epoch-example
+
+provider:
+  name: aws
+  role: arn:aws:iam::836686979053:role/lambda-with-critical-policy
+  runtime: nodejs18.x
+  memorySize: 512
+  timeout: 60
+  environment:
+    SECRET_PATH: ${self:custom.secretPath.${self:provider.stage}}
+    CHAIN_ID: 8453
+    APP_DATA_REGION: "ap-southeast-1"
+    APP_DATA_BUCKET: "app-data-base"
+    MAX_RUNNING_TIME_FOR_PARALLEL_TASK: 59
+    MAX_OLP_QUEUE_EXECUTE_ITEMS: 10
+
+  stage: prod
+  region: ap-southeast-1
+
+custom:
+  secretPath:
+    dev: /dev/base
+    prod: /prod/base
+
+functions:
+  ######################################
+  # S Vault Epoch Management
+  ######################################
+  
+  # 1. 자동 Epoch 관리 (1분마다 시간 체크, 자동 start/end)
+  processSVaultManageEpoch:
+    handler: handler.processSVaultManageEpoch
+    timeout: 60
+    memorySize: 512
+    reservedConcurrency: 1
+    description: "Manage S Vault Epoch automatically (start/end based on S3 config)"
+    events:
+      - schedule:
+          name: s-vault-manage-epoch-1min
+          description: "Check and manage S Vault Epoch every minute"
+          rate: rate(1 minute)
+          enabled: true
+  
+  # 2. OLP Queue 처리 (PROCESS 단계에서만 실행)
+  processSVaultExecuteOlpQueueParallel:
+    handler: handler.processSVaultExecuteOlpQueueParallel
+    timeout: 60
+    memorySize: 1024
+    reservedConcurrency: 1
+    description: "Execute S Vault OLP Queue in parallel during Process phase"
+    events:
+      - schedule:
+          name: s-vault-queue-process-1min
+          description: "Process S Vault OLP Queue every minute (only during PROCESS stage)"
+          rate: rate(1 minute)
+          enabled: true
+  
+  # 3. OLPPV Feeding (SUBMISSION 단계에서만 실행)
+  processSVaultFeedOlppvSubmission:
+    handler: handler.processSVaultFeedOlppvSubmission
+    timeout: 60
+    memorySize: 512
+    reservedConcurrency: 1
+    description: "Feed OLPPV during SUBMISSION phase only"
+    events:
+      - schedule:
+          name: s-vault-feed-olppv-submission-3min
+          description: "Feed S Vault OLPPV at 2,5,8,11,14,17,20,23,26,29,32,35,38,41,44,47,50,53,56,59 minutes (only during SUBMISSION stage)"
+          rate: cron(2,5,8,11,14,17,20,23,26,29,32,35,38,41,44,47,50,53,56,59 * * * ? *)
+          enabled: true
+  
+  ######################################
+  # Admin Functions (Manual Trigger)
+  ######################################
+  
+  # Config 업데이트 (Admin만 사용, 필수 초기화)
+  processUpdateEpochConfig:
+    handler: handler.processUpdateEpochConfig
+    timeout: 30
+    memorySize: 256
+    description: "Update epoch config (Admin only - required for first initialization)"
+    # ⚠️ 중요: 첫 배포 후 반드시 실행해야 함 (S3 파일 없으면 에러 발생)
+    # 
+    # 사용법:
+    # Lambda Console에서 Test 이벤트 (필수 입력):
+    # {
+    #   "vaultType": "s",                    // 필수
+    #   "submissionDurationMinutes": 20,     // 필수
+    #   "processDurationMinutes": 10         // 필수
+    # }
+    # 
+    # 동작:
+    # - S3 파일 있음: config 섹션만 업데이트 (currentEpoch는 유지)
+    # - S3 파일 없음: 전달받은 값(20/10)으로 초기화
+    #   - 컨트랙트에서 현재 round, stage 자동 가져오기
+    #   - 기준 시간 계산: 현재 시각 + 2시간 후 정각
+    #   - 컨트랙트 PROCESS: 기준 시간 = 다음 epoch 시작
+    #   - 컨트랙트 SUBMISSION: 기준 시간 = submission 종료, 나머지 역계산
+    #     예1: 16:32, PROCESS → 18:00 시작 대기
+    #     예2: 16:32, SUBMISSION, 20/10 → submission 17:40~18:00, process 18:00~18:10
+    # - configForInit 없음: 에러 발생 (기본값 없음)
+  
+  ######################################
+  # Frontend API
+  ######################################
+  
+  # Epoch 정보 조회 (Frontend countdown용)
+  getEpochInfo:
+    handler: handler.getEpochInfo
+    timeout: 10
+    memorySize: 256
+    description: "Get current epoch info for frontend"
+    events:
+      - http:
+          path: /getEpochInfo
+          method: get
+          cors: true
+    # 사용법:
+    # GET /getEpochInfo?vaultType=s
+    # Response:
+    # {
+    #   "vaultType": "s",
+    #   "currentRound": 123,
+    #   "currentStage": "SUBMISSION",
+    #   "submissionStartsAt": 1737014400000,
+    #   "submissionEndsAt": 1737015600000,
+    #   "processStartsAt": 1737015600000,
+    #   "processEndsAt": 1737016200000,
+    #   "nextEpochStartsAt": 1737016200000,
+    #   "appliedConfig": { ... },
+    #   "nextConfig": { ... },
+    #   "configChanged": true
+    # }
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+# ======================================
+# 사용 시나리오
+# ======================================
+
+# 1. 초기 설정 (한번만)
+#    - processInitializeSVaultEpochConfig 실행
+#    - S3에 epoch-config-s.json 생성됨
+#    - 기본값: 20분 submission / 10분 process
+
+# 2. 자동 운영
+#    - processSVaultManageEpoch가 1분마다 자동 실행
+#    - 시간 되면 자동으로 start/end 전환
+#    - 재배포 불필요!
+
+# 3. Config 변경
+#    - processUpdateEpochConfig 실행
+#    - 다음 epoch부터 자동 적용
+#    - 현재 진행중인 epoch는 보호됨
+
+# 4. Frontend 통합
+#    - GET /getEpochInfo로 countdown 정보 조회
+#    - configChanged로 설정 변경 감지
+
+# ======================================
+# S3 파일 구조
+# ======================================
+
+# epoch-config-s.json:
+# {
+#   "config": {
+#     "submissionDurationMinutes": 20,  // 다음 epoch에 적용
+#     "processDurationMinutes": 10
+#   },
+#   "currentEpoch": {
+#     "round": 123,
+#     "stage": "SUBMISSION",
+#     "appliedConfig": {
+#       "submissionDurationMinutes": 20,  // 현재 epoch에 적용된 설정
+#       "processDurationMinutes": 10
+#     },
+#     "submissionStartsAt": 1737014400000,
+#     "submissionEndsAt": 1737015600000,
+#     "processStartsAt": 1737015600000,
+#     "processEndsAt": 1737016200000,
+#     "nextEpochStartsAt": 1737016200000
+#   },
+#   "lastUpdated": "2026-01-16T10:00:00Z"
+# }
+
+# ======================================
+# 주의사항
+# ======================================
+
+# 1. reservedConcurrency = 1
+#    - 각 함수가 동시에 1개만 실행되도록 제한
+#    - 중복 실행 방지
+
+# 2. Epoch 보호
+#    - 진행중인 epoch는 절대 변경 안됨
+#    - Config 변경은 다음 epoch부터 적용
+
+# 3. Contract 검증
+#    - 매 전환마다 contract state 확인
+#    - Mismatch 발생 시 Slack 알림
+
+# 4. 시간 계산
+#    - Epoch 시작 시 모든 시간 미리 계산
+#    - S3 파일에 저장되어 정확성 보장

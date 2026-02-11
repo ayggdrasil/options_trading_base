@@ -1,0 +1,281 @@
+@import "tailwindcss";
+
+/* Content: Define CSS variables directly in the CSS file (recommended for v4) */
+@source "../public/index.html";
+@source "../src/**/*.{js,ts,jsx,tsx}";
+
+@config "../tailwind.config.js";
+
+@theme {
+  /* Custom Breakpoints */
+  --breakpoint-xs: 375px;      /* Extra small devices */
+  --breakpoint-sm: 640px;      /* Default breakpoint */
+  --breakpoint-md: 768px;      /* Default breakpoint */
+  --breakpoint-lg: 1024px;     /* Default breakpoint */
+  --breakpoint-xl: 1280px;     /* Default breakpoint */
+  --breakpoint-xxl: 1470px;    /* Custom breakpoint */
+  --breakpoint-2xl: 1536px;    /* Default breakpoint */
+
+  /* Colors */
+  --color-whitef2f2: #f2f2f2;
+  --color-black1214: #121417;
+  --color-black181a: #181a1f;
+  --color-black2023: #202329;
+  --color-black292c: #292C33;
+  --color-gray8c8c: #8C8C8C;
+  --color-graybfbf: #BFBFBF;
+  --color-gray4b50: #4B5059;
+  --color-blue278e: #278EF5;
+  --color-green71b8: #71B842;
+  --color-green77c2: #77C246;
+  --color-green2f3d: #2F3D2A;
+  --color-green3747: #374731;
+  --color-rede04a: #E04A3F;
+  --color-redeb4d: #EB4D42;
+  --color-red422c: #422C2A;
+  --color-red4d33: #4D3331;
+  --color-red802a: #802A24;
+  --color-orangee091: #E0911B;
+
+  --color-primaryc1: #c1d182;
+  --color-green4c: #4cad59;
+  --color-greene6: #E6FC8D;
+  --color-green7e: #7EA18A;
+  --color-greenc1: #c1d182;
+  --color-green63: #63E073;
+  --color-green51: #51b85e;
+  --color-green67: #67EB79;
+  --color-green3b: #3B5C3F;
+  --color-green4647: #46473F;
+  --color-redc7: #c74040;
+  --color-redd6: #d64545;
+  --color-redE0: #E03F3F;
+  --color-redff33: #ff3333;
+  --color-redff4d: #ff4d2e;
+  --color-red5C: #5C3B3B;
+  --color-black0a: #0a0a0a;
+  --color-black0a12: #0a120d;
+  --color-black03: #030A06;
+  --color-black12: #121212;
+  --color-black17: #171717;
+  --color-black1a: #1a1a1a;
+  --color-black1f: #1f1f1f;
+  --color-black21: #212121;
+  --color-black24: #242424;
+  --color-black26: #262626;
+  --color-black29: #292929;
+  --color-black2e: #2e2e2e;
+  --color-black33: #333333;
+  --color-black1A: #1A1A1A;
+  --color-black1c: #1C3023;
+  --color-whitee0: #e0e0e0;
+  --color-whitef0: #f0ebe5;
+  --color-whitef5: #f5f5f5;
+  --color-gray3233: #323330;
+  --color-gray52: #525252;
+  --color-grayb3: #b3b3b3;
+  --color-gray80: #808080;
+  --color-gray8b: #8b8c8f;
+  --color-gray98: #989995;
+  --color-gray99: #999999;
+  --color-gray5C: #5C5C5C;
+  --color-gray9D: #9D9B98;
+  --color-orangef793: #F7931A;
+  --color-yealow: #DCFF54;
+  --color-contentBright: #F0EBE5;
+  --color-gray4a: #4A4D49;
+  --color-greenE6: #E6FC8D;
+  --color-purpleba76: #ba76ff;
+  --color-purple4d5d: #4d5dff;
+  --color-beraOrange: #F7931A;
+
+  /* Animations */
+  --animate-toastIn: toastIn .6s both;
+  --animate-toastOut: toastOut .6s both;
+  --animate-directMessageIn: directMessageIn .6s both;
+  --animate-directMessageOut: directMessageOut .6s both;
+  --animate-chipAppearing: chipAppearing .3s ease-in-out forwards;
+
+  /* Keyframes */
+  @keyframes toastIn {
+    0% {
+      transform: translate(2000px) scale(0.7);
+      opacity: 0.7;
+    }
+    80% {
+      transform: translate(0px) scale(0.7);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes toastOut {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    20% {
+      transform: translate(0px) scale(0.7);
+      opacity: 0.7;
+    }
+    100% {
+      transform: translate(2000px) scale(0.7);
+      opacity: 0.7;
+    }
+  }
+
+  @keyframes directMessageIn {
+    0% {
+      transform: translateY(2000px);
+      opacity: 0.7;
+    }
+    80% {
+      transform: translateY(0px);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes directMessageOut {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    20% {
+      transform: translateY(0px);
+      opacity: 0.7;
+    }
+    100% {
+      transform: translateY(2000px);
+      opacity: 0.7;
+    }
+  }
+
+  @keyframes chipAppearing {
+    0% {
+      transform: scale(0);
+      opacity: 0;
+    }
+    33.3% {
+      transform: scale(1.2);
+    }
+    50% {
+      opacity: 1;
+    }
+    66.6% {
+      transform: scale(0.9);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+}
+
+@layer components {
+  .slider {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 214px;
+    min-width: 214px;
+    height: 4px;
+    outline: none;
+    border-radius: 8px;
+  }
+
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: white;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    border-radius: 100%;
+  }
+
+  .slider::-moz-range-thumb {
+    appearance: none;
+    background-color: white;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    border-radius: 100%;
+    border: none;
+  }
+
+  .slider::-moz-range-track {
+    background: #3d3d3b; /* default track color */
+  }
+
+  .slider::-moz-range-progress {
+    background: #e6fc8d; /* Filled Track color */
+  }
+}
+
+@layer base {
+  :root {
+    /* CSS variables */
+  }
+
+  html {
+    /* html specific styles */
+  }
+
+  body {
+    display: block;
+    height: 100%;
+    margin: 0px;
+    padding: 0px;
+
+    font-family: "Host Grotesk", serif, sans-serif, Avenir, Helvetica, Arial;
+    font-synthesis: none;
+    line-height: 1.5;
+
+    color-scheme: dark light;
+    color: #f5f5f5;
+    background-color: #121417;
+
+    /* Text rendering */
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
+    /* Scrollbar */
+    -ms-overflow-style: none; /* IE and Edge */
+    -webkit-overflow-scrolling: touch; /* iOS smooth scrolling */
+  }
+
+  body::-webkit-scrollbar {
+    display: none;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+.bg-text {
+  background: linear-gradient(180deg, #d8fee5 0%, #c0e4cd 100%);
+}
+
+.text-purple-gradient {
+  @apply bg-clip-text text-transparent bg-[linear-gradient(90deg,#BA76FF_0%,#4D5DFF_100%)];
+}
+
+.text-blue-gradient {
+  @apply bg-clip-text text-transparent bg-[linear-gradient(90deg,#0AF_0%,#CF0_100%)];
+}
+
+.text-yellow-gradient {
+  @apply bg-clip-text text-transparent bg-[linear-gradient(90deg,#DEFF5C_0%,#FFC247_100%)];
+}
+
+.fixed-body {
+  @apply fixed left-0 right-0 overflow-hidden;
+}

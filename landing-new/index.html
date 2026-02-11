@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/images/fav-callput.png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CallPut.app - Permissionless 24/7 On-Chain Options for US Stocks & Crypto</title>
+
+  <!-- Icon for Apple devices -->
+  <link rel="shortcut icon" href="/images/fav-callput.png" />
+  <link rel="apple-touch-icon" href="/images/fav-callput.png" />
+  <link rel="apple-touch-icon-precomposed" href="/images/fav-callput.png" />
+
+  <!-- Apple mobile web app settings -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+
+  <!-- Add Social Meta Tags -->
+  <meta name="title" content="CallPut.app" />
+  <meta name="keywords" content="CallPut.app" />
+  <meta name="description" content="Permissionless 24/7 On-Chain Options for US Stocks & Crypto" />
+  <meta name="google" content="notranslate" />
+
+  <meta property="og:site_name" content="CallPut.app" />
+  <meta property="og:title" content="CallPut.app" />
+  <meta property="og:description" content="Permissionless 24/7 On-Chain Options for US Stocks & Crypto" />
+  <meta property="og:image" content="https://callput.app/images/og-callput.png" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="CallPut.app" />
+  <meta name="twitter:title" content="CallPut.app" />
+  <meta name="twitter:description" content="Permissionless 24/7 On-Chain Options for US Stocks & Crypto" />
+  <meta name="twitter:image" content="https://callput.app/images/og-callput.png" />
+
+  <!-- Add Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+
+  <!-- MetaCRM -->
+  <!-- <script
+      src="https://attribution.metacrm.inc/tracking-1-2-1.js"
+      data-entity-id="678f59e50bb3c30f44c09f4d"
+      id="metacrm-tracking"
+      crossorigin="anonymous"
+      apiKey="3ggjmofa63w"
+      ecoSystem="EVM"
+      integrity="sha384-QIOAE+i2MqKxUL5G0//2m6wAf2QOl6CdCManlp6scvOfuMDMLLs3li5HztO00vuh"
+    ></script> -->
+
+  <!-- Google tag (gtag.js) -->
+  <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=G-29S4QG9K1F"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+      gtag("config", "G-29S4QG9K1F");
+    </script> -->
+</head>
+
+<body>
+  <!-- 모바일 감지 스크립트 -->
+  <script>
+    !(function (e) {
+      var n = /iPhone/i,
+        t = /iPod/i,
+        r = /iPad/i,
+        a = /\bAndroid(?:.+)Mobile\b/i,
+        p = /Android/i,
+        b = /\bAndroid(?:.+)SD4930UR\b/i,
+        l = /\bAndroid(?:.+)(?:KF[A-Z]{2,4})\b/i,
+        f = /Windows Phone/i,
+        s = /\bWindows(?:.+)ARM\b/i,
+        u = /BlackBerry/i,
+        c = /BB10/i,
+        h = /Opera Mini/i,
+        v = /\b(CriOS|Chrome)(?:.+)Mobile/i,
+        w = /Mobile(?:.+)Firefox\b/i;
+      function m(e, i) {
+        return e.test(i);
+      }
+      function i(e) {
+        var i = e || ("undefined" != typeof navigator ? navigator.userAgent : ""),
+          o = i.split("[FBAN");
+        void 0 !== o[1] && (i = o[0]), void 0 !== (o = i.split("Twitter"))[1] && (i = o[0]);
+        var d = {
+          apple: {
+            phone: m(n, i) && !m(f, i),
+            ipod: m(t, i),
+            tablet: !m(n, i) && m(r, i) && !m(f, i),
+            device: (m(n, i) || m(t, i) || m(r, i)) && !m(f, i),
+          },
+          amazon: {
+            phone: m(b, i),
+            tablet: !m(b, i) && m(l, i),
+            device: m(b, i) || m(l, i),
+          },
+          android: {
+            phone: (!m(f, i) && m(b, i)) || (!m(f, i) && m(a, i)),
+            tablet: !m(f, i) && !m(b, i) && !m(a, i) && (m(l, i) || m(p, i)),
+            device: (!m(f, i) && (m(b, i) || m(l, i) || m(a, i) || m(p, i))) || m(/\bokhttp\b/i, i),
+          },
+          windows: {
+            phone: m(f, i),
+            tablet: m(s, i),
+            device: m(f, i) || m(s, i),
+          },
+          other: {
+            blackberry: m(u, i),
+            blackberry10: m(c, i),
+            opera: m(h, i),
+            firefox: m(w, i),
+            chrome: m(v, i),
+            device: m(u, i) || m(c, i) || m(h, i) || m(w, i) || m(v, i),
+          },
+        };
+        return (
+          (d.any = d.apple.device || d.android.device || d.windows.device || d.other.device),
+          (d.phone = d.apple.phone || d.android.phone || d.windows.phone),
+          (d.tablet = d.apple.tablet || d.android.tablet || d.windows.tablet),
+          d
+        );
+      }
+      "undefined" != typeof module && module.exports && "undefined" == typeof window
+        ? (module.exports = i)
+        : "undefined" != typeof module && module.exports && "undefined" != typeof window
+          ? ((module.exports = i()), (module.exports.isMobile = i))
+          : "function" == typeof define && define.amd
+            ? define([], (e.isMobile = i()))
+            : (e.isMobile = i());
+    })(this);
+  </script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

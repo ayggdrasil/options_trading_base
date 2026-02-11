@@ -1,0 +1,356 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: app-lambda-sub
+# app and org for use with dashboard.serverless.com
+#app: your-app-name
+#org: your-org-name
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  memorySize: 1024
+  timeout: 60
+  environment:
+    SECRET_PATH: ${self:custom.secretPath.${self:provider.stage}}
+
+    # NODE_OPTIONS: --enable-source-maps
+    CHAIN_ID: 42161
+
+    # REGION
+    APP_DATA_REGION: "ap-southeast-1"
+    
+    # COMMON DATA
+    APP_GLOBAL_DATA_BUCKET: "app-data-base"
+    
+    APP_GLOBAL_DATA_FUTURES_KEY: futures.json
+    APP_GLOBAL_DATA_FUTURES_DAILY_KEY: futures-daily/futures-daily
+    APP_GLOBAL_DATA_SPOT_KEY: spot.json
+    APP_GLOBAL_DATA_SPOT_DAILY_KEY: spot-daily/spot-daily
+    APP_GLOBAL_DATA_SETTLE_PRICE_KEY: settle-prices.json
+    APP_GLOBAL_DATA_RISK_FREE_RATES_KEY: risk-free-rates.json
+    APP_GLOBAL_GEO_LITE_COUNTRY_DATA_KEY: GeoLite2-Country.mmdb
+    APP_GLOBAL_DATA_BINANCE_KLINE_KEY: klines-data/binance
+
+    # BERACHAIN SPECIFIC
+    APP_DATA_BUCKET: "app-data-sub"
+    
+    APP_DATA_MARKET_DATA_KEY: market-data.json
+    APP_DATA_INSTRUMENTS_KEY: instruments.json
+    APP_DATA_INSTRUMENTS_HASH_KEY: instruments-hash.json
+    APP_DATA_SETTLE_CHECK_KEY: settle-check.json
+    APP_DATA_TRADE_DATA_KEY: trade-data.json
+    APP_DATA_OLPPV_KEY: olppv.json
+    APP_DATA_OLP_DASHBOARD_KEY: olp-dashboard.json
+
+    APP_DATA_MARKET_DAILY_KEY: market-daily/market-daily
+    APP_DATA_IV_CURVE_DAILY_KEY: iv-curve-daily/iv-curve-daily
+    APP_DATA_OLP_STATS_DAILY_KEY: olp-stats-daily/olp-stats-daily
+
+    DUNE_DATA_BUCKET: dune-data-base
+
+    # max
+    MAX_RUNNING_TIME_FOR_PARALLEL_TASK: 59 # 59s
+    MAX_RETRIES: 3
+
+# you can overwrite defaults here
+  stage: prod
+  region: ap-southeast-1
+
+# you can add statements to the Lambda function's IAM Role here
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "s3:GetObject"
+            - "s3:PutObject"
+          Resource:
+            Fn::Join:
+              - ""
+              - - "arn:aws:s3:::"
+                - "app-data-base"
+                - "/*"
+        - Effect: "Allow"
+          Action:
+            - "s3:GetObject"
+            - "s3:PutObject"
+          Resource:
+            Fn::Join:
+              - ""
+              - - "arn:aws:s3:::"
+                - "app-data-sub"
+                - "/*"
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+custom:
+  secretPath:
+    dev: /dev/sub
+    prod: /prod/sub
+  esbuild:
+    bundle: true
+    minify: false
+    format: cjs
+    target: node18
+    external:
+      - '@aws-sdk/*'
+    # sourcemap: external
+  # webpack:
+  #   webpackConfig: 'webpack.config.js' # Name of webpack configuration file
+  #   includeModules: false # Node modules configuration for packaging
+  #   packager: 'npm' # Packager that will be used to package your external modules
+
+# you can add packaging information here
+# package:
+#  patterns:
+#    - dist/**
+#    - node_modules/**
+
+functions:
+  # Process Parallel
+  processExecutePositionRequestParallel:
+    handler: handler-sub.processExecutePositionRequestParallel
+    memorySize: 2048
+    # reservedConcurrency: 1
+    events:
+      - schedule:
+          name: execute-position-request-parallel
+          description: ''
+          rate: rate(1 minute)
+  processCollectMarketDataParallel:
+    handler: handler-sub.processCollectMarketDataParallel
+    memorySize: 2048
+    # reservedConcurrency: 1
+    events:
+      - schedule:
+          name: collect-market-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  processCollectTradeDataParallel:
+    handler: handler-sub.processCollectTradeDataParallel
+    memorySize: 2048
+    # reservedConcurrency: 1
+    events:
+      - schedule:
+          name: collect-trade-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  processUpdateOlppvParallel:
+    handler: handler-sub.processUpdateOlppvParallel
+    # reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-update-olppv-parallel
+          description: ''
+          rate: rate(1 minute)
+  processFeedOnchainDataParallel:
+    handler: handler-sub.processFeedOnchainDataParallel
+    # reservedConcurrency: 1
+    events:
+      - schedule:
+          name: process-feed-onchain-data-parallel
+          description: ''
+          rate: rate(1 minute)
+  # Process Single
+  processUpdateDaily:
+    handler: handler-sub.processUpdateDaily
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-update-daily
+          description: ''
+          rate: cron(0-5 0 * * ? *)
+  processNotifyTradeData:
+    handler: handler-sub.processNotifyTradeData
+    events:
+      - schedule:
+          name: notify-trade-data
+          description: ''
+          rate: cron(0 8 * * ? *)
+  processNotifyPositions:
+    handler: handler-sub.processNotifyPositions
+    events:
+      - schedule:
+          name: process-notify-positions
+          description: ''
+          rate: rate(1 minute)
+  processCheckAvailableAmounts:
+    handler: handler-sub.processCheckAvailableAmounts
+    events:
+      - schedule:
+          name: check-available-amounts
+          description: ''
+          rate: cron(0 0/4 * * ? *)
+  processCheckMarketChange:
+    handler: handler-sub.processCheckMarketChange
+    events:
+      - schedule:
+          name: process-check-market-change
+          description: ''
+          rate: rate(5 minutes)
+  processCheckKeeperBalances:
+    handler: handler-sub.processCheckKeeperBalances
+    events:
+      - schedule:
+          name: check-keeper-balances
+          description: ''
+          rate: rate(30 minutes)
+  processCheckFeedUpdates:
+    handler: handler-sub.processCheckFeedUpdates
+    events:
+      - schedule:
+          name: check-feed-updates
+          description: ''
+          rate: rate(1 minute)
+  processCheckFileUpdates:
+    handler: handler-sub.processCheckFileUpdates
+    events:
+      - schedule:
+          name: check-file-updates
+          description: ''
+          rate: rate(1 minute)
+  processCollectOlpStats:
+    handler: handler-sub.processCollectOlpStats
+    memorySize: 2048
+    events:
+      - schedule:
+          name: collect-olp-stats
+          description: ''
+          rate: rate(1 minute)
+  processCollectMarketDaily:
+    handler: handler-sub.processCollectMarketDaily
+    memorySize: 2048
+    events:
+      - schedule:
+          name: process-collect-market-daily
+          description: ''
+          rate: cron(0 0 * * ? *)
+  processDetectPriceVolatility:
+    handler: handler-sub.processDetectPriceVolatility
+    events:
+      - schedule:
+          name: detect-price-volatility
+          description: ''
+          rate: rate(1 minute)
+  processFeedInstruments:
+    handler: handler-sub.processFeedInstruments
+    events:
+      - schedule:
+          name: feed-instruments-1
+          description: ''
+          rate: cron(5,20,35,50 8-23 * * ? *)
+      - schedule:
+          name: feed-instruments-2
+          description: ''
+          rate: cron(5,20,35,50 0-7 * * ? *)
+  processUpdateOptionsMarket:
+    handler: handler-sub.processUpdateOptionsMarket
+    events:
+      - schedule:
+          name: update-options-market
+          description: ''
+          rate: rate(1 hour)
+  processDistributeFee:
+    handler: handler-sub.processDistributeFee
+    events:
+      - schedule:
+          name: distribute-fee
+          description: ''
+          rate: cron(0 0 * * ? *)
+  processDistributeReward:
+    handler: handler-sub.processDistributeReward
+    events:
+      - schedule:
+          name: distribute-reward
+          description: ''
+          rate: rate(1 minute)
+  processClearPositions:
+    handler: handler-sub.processClearPositions
+    events:
+      - schedule:
+          name: clear-positions
+          description: ''
+          rate: rate(10 minutes)
+  processFeedSettlePrice:
+    handler: handler-sub.processFeedSettlePrice
+    events:
+      - schedule:
+          name: feed-settle-price-new
+          description: ''
+          rate: cron(2-7 8 * * ? *)
+  processExecuteVaultSettlement:
+    handler: handler-sub.processExecuteVaultSettlement
+    events:
+      - schedule:
+          name: execute-vault-settlement-new
+          description: ''
+          rate: cron(5-30 8 * * ? *)
+  applyOLPDepositPoints:
+    handler: handler-sub.applyOLPDepositPoints
+    events:
+      - schedule:
+          name: daily-olp-deposit-point
+          description: ''
+          rate: cron(0 0 * * ? *)
+  applyWeeklyRewardPoints:
+    handler: handler-sub.applyWeeklyRewardPoints
+    events:
+      - schedule:
+          name: weekly-reward-points
+          description: ''
+          rate: cron(0 0 ? * MON *)
+  query:
+    handler: handler-sub.query
+  getVolumeData:
+    handler: handler-sub.getVolumeData
+    events:
+      - http:
+          path: /getVolumeData
+          method: get
+          cors: true
+  getRevenue:
+    handler: handler-sub.getRevenue
+    events:
+      - http:
+          path: /getRevenue
+          method: get
+          cors: true
+  getProtocolNetRevenue:
+    handler: handler-sub.getProtocolNetRevenue
+    events:
+      - http:
+          path: /getProtocolNetRevenue
+          method: get
+          cors: true
+  demo:
+    handler: handler-sub.demo
+  # updateOlpPoolDashboardData:
+  #   handler: handler-sub.updateOlpPoolDashboardData
+  #   events:
+  #     - schedule: 
+  #         name: update-olp-pool-dashboard-data-bera
+  #         description: ''
+  #         rate: rate(6 hours)
+
+plugins:
+  - serverless-functions-base-path
+  # - serverless-webpack
+  - serverless-esbuild
+  - serverless-offline

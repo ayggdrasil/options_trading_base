@@ -1,0 +1,5 @@
+export const SETTLE_PRICE_DATA_API = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/settle-prices.json"
+export const IS_RESTRICTED_COUNTRY_API = "https://q2ky1hk656.execute-api.ap-southeast-1.amazonaws.com/prod/isRestrictedCountry"
+export const KLINE_API = "https://q2ky1hk656.execute-api.ap-southeast-1.amazonaws.com/prod/getKlines"
+export const WEBSOCKET_API = "wss://nuq7h8s73j.execute-api.ap-southeast-1.amazonaws.com/prod/"
+export const MARKET_DAILY_API = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-daily/market-daily"
