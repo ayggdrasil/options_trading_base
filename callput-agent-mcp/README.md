@@ -43,13 +43,36 @@ Expected output:
    Total active options available: 200+
 ```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
-[![Base L2](https://img.shields.io/badge/Base-L2-0052FF)](https://base.org/)
-
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start for External Agents
+
+### Step 1: Clone and Install
+
+```bash
+# Clone the repository
+git clone https://github.com/ayggdrasil/options_trading_base.git
+cd options_trading_base/callput-agent-mcp
+
+# Install dependencies
+npm install
+
+# Build the server
+npm run build
+
+# Test connection
+node build/test_s3_fetch.js
+```
+
+Expected output:
+```
+✅ S3 fetch successful!
+   BTC expiries: 4
+   ETH expiries: 4
+   Total active options available: 214
+
+✅ SUCCESS: S3 market data contains active options!
+```
 
 ### For External Agent Developers
 
@@ -89,10 +112,10 @@ For custom agents (Telegram bots, Discord bots, etc.), use the MCP SDK:
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-// Connect to MCP server
+// Connect to MCP server (adjust path to your clone location)
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["./build/index.js"],
+  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
   env: { RPC_URL: "https://mainnet.base.org" }
 });
 
@@ -114,16 +137,20 @@ const result = await client.callTool({
 console.log(result.content[0].text);
 ```
 
-### Method 2: Claude Desktop
+### Step 2: Configure Your Agent
 
-For Claude Desktop users, add to `claude_desktop_config.json`:
+**For Claude Desktop users:**
+
+Add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": ["/absolute/path/to/options_trading_base/build/index.js"],
+      "args": [
+        "/path/to/options_trading_base/callput-agent-mcp/build/index.js"
+      ],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -131,6 +158,8 @@ For Claude Desktop users, add to `claude_desktop_config.json`:
   }
 }
 ```
+
+> Replace `/path/to/` with your actual clone location, e.g., `/Users/yourname/options_trading_base/`
 
 **Config file locations:**
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
