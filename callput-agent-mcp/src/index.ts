@@ -192,124 +192,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const assetMarket = marketData.data.market[assetName];
             const options: any[] = [];
 
-            // 3. Parse options from S3 data
+            // 3. Parse options from S3 data → Slim JSON format
+            // Each option is compressed to 5 core fields: tid, inst, desc, liq, days
+            // This reduces per-option payload from ~800 chars to ~150 chars (~80% savings)
+
+            const formatOption = (option: any, expiry: string, type: "Call" | "Put") => {
+                const expiryDate = new Date(Number(expiry) * 1000);
+                const day = String(expiryDate.getUTCDate()).padStart(2, '0');
+                const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+                const month = monthNames[expiryDate.getUTCMonth()];
+                const year = String(expiryDate.getUTCFullYear()).slice(-2);
+                const formattedExpiry = `${day}${month}${year}`;
+                const now = Math.floor(Date.now() / 1000);
+                const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
+
+                return {
+                    tid: option.optionId,
+                    inst: option.instrument,
+                    desc: `${type} @ ${option.strikePrice} exp ${formattedExpiry}`,
+                    liq: option.liquidity?.toFixed(4) || "0",
+                    days: daysToExpiry,
+                };
+            };
+
             for (const expiry of assetMarket.expiries || []) {
                 const expiryOptions = assetMarket.options[expiry];
                 if (!expiryOptions) continue;
 
-                // Process calls
                 for (const option of expiryOptions.call || []) {
                     if (!option.isOptionAvailable) continue;
-
-                    const expiryDate = new Date(Number(expiry) * 1000);
-                    const day = String(expiryDate.getUTCDate()).padStart(2, '0');
-                    const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-                    const month = monthNames[expiryDate.getUTCMonth()];
-                    const year = String(expiryDate.getUTCFullYear()).slice(-2);
-                    const formattedExpiry = `${day}${month}${year}`;
-
-                    const now = Math.floor(Date.now() / 1000);
-                    const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
-
-                    options.push({
-                        // Raw data
-                        option_id: option.optionId,
-                        underlying_asset: params.underlying_asset,
-                        instrument: option.instrument,
-                        strike_price: option.strikePrice,
-                        expiry: Number(expiry),
-
-                        // Pricing data (from S3)
-                        mark_iv: option.markIv,
-                        mark_price: option.markPrice,
-                        risk_premium_buy: option.riskPremiumRateForBuy,
-                        risk_premium_sell: option.riskPremiumRateForSell,
-
-                        // Greeks
-                        delta: option.delta,
-                        gamma: option.gamma,
-                        vega: option.vega,
-                        theta: option.theta,
-
-                        // Volume
-                        volume: option.volume,
-
-                        // Human-readable format
-                        display: {
-                            instrument: option.instrument,
-                            type: "Call",
-                            side: "Available",
-                            option_type: "Vanilla",
-                            expiry_date: expiryDate.toISOString().split('T')[0],
-                            expiry_formatted: formattedExpiry,
-                            days_to_expiry: daysToExpiry,
-                            strike: option.strikePrice,
-                            description: `Call @ ${option.strikePrice} expiring ${formattedExpiry}`,
-                            mark_price: option.markPrice?.toFixed(6) || "N/A",
-                            mark_iv: option.markIv ? `${(option.markIv * 100).toFixed(2)}%` : "N/A",
-                        }
-                    });
+                    options.push(formatOption(option, expiry, "Call"));
                 }
 
-                // Process puts
                 for (const option of expiryOptions.put || []) {
                     if (!option.isOptionAvailable) continue;
-
-                    const expiryDate = new Date(Number(expiry) * 1000);
-                    const day = String(expiryDate.getUTCDate()).padStart(2, '0');
-                    const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-                    const month = monthNames[expiryDate.getUTCMonth()];
-                    const year = String(expiryDate.getUTCFullYear()).slice(-2);
-                    const formattedExpiry = `${day}${month}${year}`;
-
-                    const now = Math.floor(Date.now() / 1000);
-                    const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
-
-                    options.push({
-                        // Raw data
-                        option_id: option.optionId,
-                        underlying_asset: params.underlying_asset,
-                        instrument: option.instrument,
-                        strike_price: option.strikePrice,
-                        expiry: Number(expiry),
-
-                        // Pricing data (from S3)
-                        mark_iv: option.markIv,
-                        mark_price: option.markPrice,
-                        risk_premium_buy: option.riskPremiumRateForBuy,
-                        risk_premium_sell: option.riskPremiumRateForSell,
-
-                        // Greeks
-                        delta: option.delta,
-                        gamma: option.gamma,
-                        vega: option.vega,
-                        theta: option.theta,
-
-                        // Volume
-                        volume: option.volume,
-
-                        // Human-readable format
-                        display: {
-                            instrument: option.instrument,
-                            type: "Put",
-                            side: "Available",
-                            option_type: "Vanilla",
-                            expiry_date: expiryDate.toISOString().split('T')[0],
-                            expiry_formatted: formattedExpiry,
-                            days_to_expiry: daysToExpiry,
-                            strike: option.strikePrice,
-                            description: `Put @ ${option.strikePrice} expiring ${formattedExpiry}`,
-                            mark_price: option.markPrice?.toFixed(6) || "N/A",
-                            mark_iv: option.markIv ? `${(option.markIv * 100).toFixed(2)}%` : "N/A",
-                        }
-                    });
+                    options.push(formatOption(option, expiry, "Put"));
                 }
             }
 
-            // Sort by expiry, then strike
-            options.sort((a, b) => {
-                if (a.expiry !== b.expiry) return a.expiry - b.expiry;
-                return a.strike_price - b.strike_price;
+            // Sort by days to expiry, then instrument name
+            options.sort((a: any, b: any) => {
+                if (a.days !== b.days) return a.days - b.days;
+                return a.inst.localeCompare(b.inst);
             });
 
             return {
@@ -317,12 +241,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     {
                         type: "text",
                         text: JSON.stringify({
-                            underlying_asset: params.underlying_asset,
-                            total_options: options.length,
-                            options,
-                            data_source: "S3 Market Data (Updated Live)",
-                            last_updated: marketData.lastUpdatedAt,
-                        }, null, 2),
+                            asset: params.underlying_asset,
+                            total: options.length,
+                            opts: options,
+                        }),
                     },
                 ],
             };
