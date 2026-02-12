@@ -179,9 +179,10 @@ This MCP server acts as a **translator between AI agents and on-chain options ma
 **Example agent interaction:**
 ```
 User: "Show me WETH Call options expiring in the next month"
-Agent: Uses MCP → "Found 3 options:
-  1. Buy Call @ 3000 expiring 20FEB24 (15 days, 0.5 WETH liquidity)
-  2. Buy Call Spread (3000/3200) expiring 28FEB24 (23 days, 1.2 WETH liquidity)
+Agent: Uses MCP → "Found options for WETH.
+  Constructing Spreads:
+  1. Buy Call Spread (3000/3200) expiring 20FEB24 (15 days)
+  2. Buy Put Spread (2800/2600) expiring 28FEB24 (23 days)
   ..."
 ```
 
@@ -229,9 +230,10 @@ Generate transaction calldata for opening a position.
 **Input:**
 ```json
 {
-  "option_token_id": "123...",
-  "amount": 100,
-  "is_buy": true,
+  "strategy": "BuyCallSpread", // or "BuyPutSpread"
+  "long_leg_id": "123...",     // Token ID for Long Leg
+  "short_leg_id": "124...",    // Token ID for Short Leg
+  "amount": 100,               // Payment amount (USDC)
   "slippage": 0.5
 }
 ```

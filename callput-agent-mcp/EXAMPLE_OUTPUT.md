@@ -102,8 +102,8 @@ const data = await mcp.call("get_option_chains", { underlying_asset: "WETH" });
 
 **Agent Response**:
 "I found 2 WETH options on Base:
-1. **Buy Call @ 3000** expiring 20FEB24 (45 days, 0.5 WETH liquidity)
-2. **Buy Call Spread (3000/3200)** expiring 20FEB24 (45 days, 1.2 WETH liquidity)"
+1. **Debit Call Spread** (3000/3200) expiring 20FEB24
+2. **Debit Put Spread** (2800/2600) expiring 20FEB24"
 
 ### Example 2: Filtering and Recommendation
 **User**: "Find me a Call option expiring in about a month"
@@ -119,11 +119,11 @@ const filtered = data.options.filter(o =>
 ```
 
 **Agent Response**:
-"I recommend the **WETH-20FEB24-3000-C** option:
-- Strategy: Buy Call
-- Strike: $3000
-- Expires in 30 days
-- Available liquidity: 0.5 WETH"
+"I recommend a **Debit Call Spread (3000/3200)**:
+- Long Call @ 3000
+- Short Call @ 3200
+- Max Profit: 200 - Debit
+- Max Loss: Debit Paid"
 
 ## Benefits for Agents
 
@@ -138,13 +138,29 @@ const filtered = data.options.filter(o =>
 ### Before (Raw Only)
 ```json
 {
-  "option_token_id": "12345...",
-  "strategy": "BuyCall",
-  "strike_price": 3000,
-  "expiry": 1730000000,
-  "liquidity": "500000000000000000"
+  "underlying_asset": "WETH",
+  "total_options": 2,
+  "options": [
+    {
+      "option_token_id": "123...",
+      "strategy": "BuyCall",
+      "strike_price": 3000,
+      // ...
+    },
+    {
+      "option_token_id": "124...",
+      "strategy": "BuyCall", 
+      "strike_price": 3200,
+      // ...
+    }
+  ]
 }
 ```
+
+Agent logic to build spread:
+1. Find Long Leg (e.g. Strike 3000)
+2. Find Short Leg (e.g. Strike 3200)
+3. Call `request_quote` with both IDs
 
 Agent needs to:
 - Convert timestamp to date

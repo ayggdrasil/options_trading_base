@@ -25,11 +25,25 @@
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, var(--dark) 0%, #1a1f2e 100%);
+            font-family: Georgia, 'Times New Roman', Times, serif;
+            background: url('background.png') no-repeat center center fixed;
+            background-size: cover;
             color: var(--text);
             line-height: 1.6;
             overflow-x: hidden;
+            position: relative;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 15, 30, 0.85);
+            /* Dark overlay for readability */
+            z-index: -1;
         }
 
         .container {
@@ -46,15 +60,8 @@
         }
 
         header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 600px;
-            height: 600px;
-            background: radial-gradient(circle, rgba(0, 82, 255, 0.1) 0%, transparent 70%);
-            pointer-events: none;
+            display: none;
+            /* Remove old radial gradient */
         }
 
         h1 {
@@ -62,6 +69,7 @@
             font-weight: 800;
             background: linear-gradient(135deg, var(--primary), var(--secondary));
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 16px;
         }
@@ -580,16 +588,18 @@ cd options_trading_base</code></pre>
                     </p>
                 </div>
                 <div class="install-step">
-                    <h3>Fund Your Agent's Wallet</h3>
-                    <p style="margin-bottom: 12px;">Create a Base wallet and fund it:</p>
-                    <pre><code># 1. Create new wallet (save the private key!)
-# 2. Bridge ETH to Base L2 (for gas fees)
+                    <h3>Fund & Approve Wallet</h3>
+                    <p style="margin-bottom: 12px;">Prepare your agent's wallet:</p>
+                    <pre><code># 1. Create/Load Wallet (save private key safely)
+# 2. Bridge ETH to Base L2 (for gas)
 # 3. Bridge USDC to Base L2 (for trading)
-# 4. Add to your agent's .env file:
-PRIVATE_KEY=0x1234567890abcdef...
+# 4. Approve USDC Spender:
+#    Spender: 0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2
+# 5. Configure .env:
+PRIVATE_KEY=...
 RPC_URL=https://mainnet.base.org</code></pre>
                     <p style="margin-top: 12px; font-size: 0.875rem; color: var(--warning);">
-                        ⚠️ Keep private keys secure. Never commit .env files to git.
+                        ⚠️ Critical: You MUST approve the spender address above for USDC to enable trading.
                     </p>
                 </div>
                 <div class="install-step">

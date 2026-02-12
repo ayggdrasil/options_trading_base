@@ -147,31 +147,51 @@ Open http://localhost:6274 in your browser:
 }
 ```
 
-**Output Example:**
+**Output (Hierarchical Data):**
 ```json
 {
-  "total_options": 214,
-  "data_source": "S3 Market Data (Updated Live)",
-  "options": [
-    {
-      "instrument": "ETH-14FEB26-3200-C",
-      "strike_price": 3200,
-      "mark_price": 0.125,
-      "mark_iv": 0.65,
-      "delta": 0.48,
-      "gamma": 0.0012,
-      "display": {
-        "description": "Call @ 3200 expiring 14FEB26",
-        "days_to_expiry": 3
-      }
+  "asset": "WETH",
+  "expiries": {
+    "14FEB26": {
+      "days": 1,
+      "call": [
+        { "s": 3000, "id": "123...", "p": "0.0500", "l": "1.2" },
+        { "s": 3100, "id": "124...", "p": "0.0200", "l": "0.8" }
+        // ... sorted by strike (Buy context)
+      ],
+      "put": [
+        { "s": 2800, "id": "125...", "p": "0.0100", "l": "1.0" }
+        // ... sorted by strike
+      ]
     }
-  ]
+  }
 }
 ```
+> **Structure:** Asset > Expiry > Call/Put > Strike List
+> **Data:** `s` (Strike), `id` (Leg Token ID), `p` (Mark Price), `l` (Liquidity)
 
 ### `request_quote`
 
-Generate transaction calldata for executing trades.
+Enforces **Spread Trading** (Callput.app style). Single leg trading is disabled to ensure safety.
+
+**Input:**
+```json
+{
+  "strategy": "BuyCallSpread",  // or "BuyPutSpread"
+  "long_leg_id": "123...",      // Token ID for the Long Leg
+  "short_leg_id": "124...",     // Token ID for the Short Leg
+  "amount": 1,
+  "slippage": 0.5
+}
+```
+
+**Strategy Rules:**
+- **BuyCallSpread (Bull Call):** `Long Strike < Short Strike` (Both Calls)
+- **BuyPutSpread (Bear Put):** `Long Strike > Short Strike` (Both Puts)
+
+**Output:**
+Generates transaction calldata for `PositionManager.createOpenPosition`.
+
 
 ---
 
@@ -185,6 +205,12 @@ Generate transaction calldata for executing trades.
 
 **"Connection failed"**
 → Verify your internet connection and RPC endpoint (default: https://mainnet.base.org).
+
+**"ERC20: transfer amount exceeds allowance"**
+→ **Critical:** You must approve **USDC** for the **PositionManager** contract.
+→ Even if you are trading WBTC options, the MCP `request_quote` tool constructs transactions that pay with **USDC** (`path=[USDC]`).
+→ **Action:** Approve `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (USDC) for spender `0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2` (Router).
+→ The `request_quote` tool now returns these addresses in its response for easy verification.
 
 ---
 

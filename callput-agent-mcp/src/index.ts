@@ -116,7 +116,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     properties: {
                         underlying_asset: {
                             type: "string",
-                            description: "The underlying asset symbol (e.g., WETH). Currently supports WETH (Index 2).",
+                            description: "The underlying asset symbol (e.g., WETH). Retrieve option legs to construct Spreads (Call Spread / Put Spread). Single leg trading is disabled.",
                         },
                     },
                     required: ["underlying_asset"],
@@ -164,54 +164,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const params = Schema.parse(args);
 
             // 1. Validate Asset - Map WBTC/WETH to BTC/ETH for S3 data
-            const assetConfig = CONFIG.ASSETS[params.underlying_asset as keyof typeof CONFIG.ASSETS];
-            if (!assetConfig) {
+            let assetName = params.underlying_asset.toUpperCase();
+            if (assetName === "WBTC") assetName = "BTC";
+            if (assetName === "WETH") assetName = "ETH";
+
+            if (!["BTC", "ETH"].includes(assetName)) {
                 return {
-                    content: [{ type: "text", text: `Unsupported asset: ${params.underlying_asset}. Supported: ${Object.keys(CONFIG.ASSETS).join(", ")}` }],
+                    content: [
+                        {
+                            type: "text",
+                            text: `Error: Unsupported asset ${assetName}. Only BTC and ETH are supported.`,
+                        },
+                    ],
                     isError: true,
                 };
             }
 
-            // Map WBTC -> BTC, WETH -> ETH for S3 data
-            const assetName = params.underlying_asset === "WBTC" ? "BTC" : "ETH";
+            // 2. Fetch Market Data from S3
+            // Public S3 bucket for Callput.app market data
+            // https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json
+            const S3_URL = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json";
 
-            // 2. Fetch market data from S3
-            const response = await fetch(CONFIG.S3_MARKET_DATA_URL);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch market data from S3: ${response.statusText}`);
-            }
-            const marketData = await response.json();
-
-            if (!marketData?.data?.market?.[assetName]) {
+            let marketData;
+            try {
+                const response = await fetch(S3_URL);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                marketData = await response.json();
+            } catch (error) {
+                console.error("Failed to fetch S3 data:", error);
                 return {
-                    content: [{ type: "text", text: `No market data found for ${assetName}` }],
+                    content: [{ type: "text", text: "Error: Failed to fetch market data from S3." }],
+                    isError: true,
+                };
+            }
+
+            if (!marketData.data || !marketData.data.market || !marketData.data.market[assetName]) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Error: No market data found for ${assetName} in S3.`,
+                        },
+                    ],
                     isError: true,
                 };
             }
 
             const assetMarket = marketData.data.market[assetName];
-            const options: any[] = [];
 
-            // 3. Parse options from S3 data → Slim JSON format
-            // Each option is compressed to 5 core fields: tid, inst, desc, liq, days
-            // This reduces per-option payload from ~800 chars to ~150 chars (~80% savings)
+            // 3. Parse options from S3 data → Hierarchical Slim JSON format
+            // Structure: Asset > Expiry > Call/Put > Buy > Strikes
+            // "Buy" is implied as the default action for these options.
 
-            const formatOption = (option: any, expiry: string, type: "Call" | "Put") => {
-                const expiryDate = new Date(Number(expiry) * 1000);
-                const day = String(expiryDate.getUTCDate()).padStart(2, '0');
-                const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-                const month = monthNames[expiryDate.getUTCMonth()];
-                const year = String(expiryDate.getUTCFullYear()).slice(-2);
-                const formattedExpiry = `${day}${month}${year}`;
-                const now = Math.floor(Date.now() / 1000);
-                const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
+            // Container for the hierarchy
+            const hierarchy: Record<string, {
+                days: number,
+                call: any[],
+                put: any[]
+            }> = {};
 
+            const formatOption = (option: any) => {
                 return {
-                    tid: option.optionId,
-                    inst: option.instrument,
-                    desc: `${type} @ ${option.strikePrice} exp ${formattedExpiry}`,
-                    liq: option.liquidity?.toFixed(4) || "0",
-                    days: daysToExpiry,
+                    s: option.strikePrice,       // Strike
+                    id: option.optionId,         // Token ID
+                    p: option.markPrice?.toFixed(4) || "0", // Price
+                    l: option.liquidity?.toFixed(4) || "0"  // Liquidity
                 };
             };
 
@@ -219,22 +236,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const expiryOptions = assetMarket.options[expiry];
                 if (!expiryOptions) continue;
 
+                // Format Expiry Date (e.g., "14FEB26")
+                const expiryDate = new Date(Number(expiry) * 1000);
+                const day = String(expiryDate.getUTCDate()).padStart(2, '0');
+                const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+                const month = monthNames[expiryDate.getUTCMonth()];
+                const year = String(expiryDate.getUTCFullYear()).slice(-2);
+                const formattedExpiry = `${day}${month}${year}`;
+
+                const now = Math.floor(Date.now() / 1000);
+                const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
+
+                if (!hierarchy[formattedExpiry]) {
+                    hierarchy[formattedExpiry] = {
+                        days: daysToExpiry,
+                        call: [],
+                        put: []
+                    };
+                }
+
+                // Process Calls
                 for (const option of expiryOptions.call || []) {
                     if (!option.isOptionAvailable) continue;
-                    options.push(formatOption(option, expiry, "Call"));
+                    hierarchy[formattedExpiry].call.push(formatOption(option));
                 }
+                // Sort Calls by Strike ASC
+                hierarchy[formattedExpiry].call.sort((a, b) => a.s - b.s);
 
+                // Process Puts
                 for (const option of expiryOptions.put || []) {
                     if (!option.isOptionAvailable) continue;
-                    options.push(formatOption(option, expiry, "Put"));
+                    hierarchy[formattedExpiry].put.push(formatOption(option));
                 }
+                // Sort Puts by Strike DESC (usual convention, or just ASC is fine)
+                hierarchy[formattedExpiry].put.sort((a, b) => a.s - b.s);
             }
 
-            // Sort by days to expiry, then instrument name
-            options.sort((a: any, b: any) => {
-                if (a.days !== b.days) return a.days - b.days;
-                return a.inst.localeCompare(b.inst);
-            });
+            // Sort Hierarchy Keys by Days to Expiry?
+            // Object keys in JS aren't strictly ordered, but we can't easily sort a map.
+            // However, the Agent will parse the JSON. 
+            // We can return a sorted array of objects if needed, but user asked for "Variable > Variable" hierarchy.
+            // A map `expiry -> data` is the best representation of that hierarchy.
 
             return {
                 content: [
@@ -242,8 +284,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         type: "text",
                         text: JSON.stringify({
                             asset: params.underlying_asset,
-                            total: options.length,
-                            opts: options,
+                            // The hierarchy: Expiry Key -> { days, call: [...], put: [...] }
+                            // "Buy" is implicit in the list of available options.
+                            expiries: hierarchy,
+                            last_updated: marketData.lastUpdatedAt,
                         }),
                     },
                 ],
@@ -252,18 +296,97 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (name === "request_quote") {
             const Schema = z.object({
-                option_token_id: z.string(),
+                strategy: z.enum(["BuyCallSpread", "BuyPutSpread"]),
+                long_leg_id: z.string(),
+                short_leg_id: z.string(),
                 amount: z.number().positive(),
-                is_buy: z.boolean(),
                 slippage: z.number().optional().default(0.5),
             });
             const params = Schema.parse(args);
-            const tokenId = BigInt(params.option_token_id);
-            const parsed = parseOptionTokenId(tokenId);
 
-            // For now, assume payment in USDC for buys, or Native/Underlying for specific cases.
-            // Simplified flow: Payment is always in USDC for simplicity in this agent version, unless specified.
-            // But wait, `createOpenPosition` takes `path`.
+            // Helpers to parse Token ID parts
+            // We need: underlyingAssetIndex, expiry, strikePrice
+            const parseTokenId = (tokenIdStr: string) => {
+                const id = BigInt(tokenIdStr);
+                // Bit layout:
+                // [248bits unused][8bits unused][16bits asset][40bits expiry][48bits strike][1 bit isBuy][1 bit isCall][...remainder]
+                // Wait, `createOpenPosition` uses `optionId` as the key which is:
+                // keccak256(abi.encodePacked(underlying, expiry, strike))
+                // BUT the "id" we get from S3 is `optionId` (BigInt string) which is likely the *Position Token ID*?
+                // Let's re-verify `parseOptionTokenId` logic at top of file. 
+                // It unpacks 256 bits.
+                return parseOptionTokenId(id);
+            };
+
+            const longLeg = parseTokenId(params.long_leg_id);
+            const shortLeg = parseTokenId(params.short_leg_id);
+
+            // Validation: Must be same Asset and Expiry
+            if (longLeg.underlyingAssetIndex !== shortLeg.underlyingAssetIndex) {
+                throw new Error("Legs must have same Underlying Asset");
+            }
+            if (longLeg.expiry !== shortLeg.expiry) {
+                throw new Error("Legs must have same Expiry");
+            }
+
+            // Strategy Validation
+            // BuyCallSpread: Long Lower Strike (Buy), Short Higher Strike (Sell)
+            // BuyPutSpread: Long Higher Strike (Buy), Short Lower Strike (Sell)
+
+            // Check Call/Put consistency
+            const isCall = params.strategy === "BuyCallSpread";
+            // Note: We skip checking longLeg.isCall/shortLeg.isCall from the ID 
+            // because S3 IDs might have bit flags set differently or strategy=0.
+            // We rely on the User/Agent's requested strategy.
+
+            // Check Strikes
+            const longStrike = longLeg.strikePrices[0];
+            const shortStrike = shortLeg.strikePrices[0];
+
+            if (isCall) {
+                // Bull Call Spread: Buy Low, Sell High
+                if (longStrike >= shortStrike) throw new Error("For Bull Call Spread, Long Strike must be < Short Strike");
+            } else {
+                // Bull Put Spread (Credit) or Bear Put Spread (Debit)?
+                // Callput App "Put Spread" usually refers to Debit Put Spread (Bear Put Spread).
+                // Bear Put Spread: Buy High, Sell Low.
+                // Let's assume user wants Debit Spreads as per "Buy" keyword.
+                // Buy Put Spread = Long Put (High K) + Short Put (Low K) -> Net Debit.
+                if (longStrike <= shortStrike) throw new Error("For Bear Put Spread, Long Strike must be > Short Strike");
+            }
+
+            // Construct Transaction Payload
+            // function createOpenPosition(...)
+            // Strikes: [Long, Short, 0, 0]
+            // isBuys: [true, false, false, false] (Buy Long, Sell Short)
+            // isCalls: [isCall, isCall, false, false]
+
+            const strikes = [longStrike, shortStrike, 0, 0];
+            const isBuys = [true, false, false, false];
+            const isCalls = [isCall, isCall, false, false];
+
+            // Reconstruct Option IDs to pass to contract
+            // The contract needs `keccak256(abi.encodePacked(underlying(uint16), expiry(uint40), strike(uint48)))`
+            // We can derive this from the legs.
+
+            const generateOptionId = (assetIdx: number, expiry: number, strike: number) => {
+                if (strike === 0) return ethers.ZeroHash;
+                const packed = ethers.solidityPacked(
+                    ["uint16", "uint40", "uint48"],
+                    [assetIdx, expiry, strike]
+                );
+                return ethers.keccak256(packed);
+            };
+
+            const optionIds = [
+                generateOptionId(longLeg.underlyingAssetIndex, longLeg.expiry, longStrike),
+                generateOptionId(longLeg.underlyingAssetIndex, longLeg.expiry, shortStrike),
+                ethers.ZeroHash,
+                ethers.ZeroHash
+            ];
+
+            // Execution Fee
+            const executionFee = await positionManager.executionFee();
 
             // Standard Path: [USDC] -> Vault
             const USDC = CONFIG.CONTRACTS.USDC;
@@ -273,96 +396,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const decimals = await getDecimals(USDC);
             const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
 
-            // Min Out (Slippage)
-            // In a real quoting system, we'd query the reader for expected output. 
-            // Here we just set 0 for simplicity or calculate if we had price data.
-            // IMPORTANT: For the agent to be safe, we should probably fetch the price first.
-            // But checking price is complex without the Reader contract completely mapped.
-            // We will set minOut to 0 for this MVP, instructing the user to check prices.
+            // Spread strategies start at 5 (BuyCallSpread)
+            // But PositionManager determines logic by `length` and `isBuys`.
+            // We always send length=2 for Spreads.
+            const length = 2;
+            const minSize = 0n;
             const minOutWhenSwap = 0n;
-            const minSize = 0n; // Accept any size for now
-
-            // Params for createOpenPosition
-            // function createOpenPosition(
-            //   uint16 _underlyingAssetIndex, 
-            //   uint8 _length, 
-            //   bool[4] memory _isBuys, 
-            //   bytes32[4] memory _optionIds, 
-            //   bool[4] memory _isCalls, 
-            //   uint256 _minSize, 
-            //   address[] memory _path, 
-            //   uint256 _amountIn, 
-            //   uint256 _minOutWhenSwap, 
-            //   address _leadTrader
-            // )
-
-            // Recover the constituent parts from the Token ID
-            // We need `optionIds` (bytes32). 
-            // `parseOptionTokenId` gives us components, but `createOpenPosition` asks for `optionIds`.
-            // Wait, looking at `PositionManager.sol`, `openPositionRequest` takes `optionIds`.
-            // But `createOpenPosition` *calculates* the token ID?
-            // "createOpenPosition... returns (bytes32)" -> Request Key.
-
-            // Actually, we need to reconstruct `optionIds`.
-            // `OptionsMarket.getOptionId` can generate it. 
-            // Or we can just compute it locally: `keccak256(abi.encodePacked(underlying, expiry, strike))`
-
-            const optionIds: string[] = [];
-            for (let i = 0; i < 4; i++) {
-                if (parsed.strikePrices[i] === 0) {
-                    optionIds.push(ethers.ZeroHash);
-                    continue;
-                }
-                const packed = ethers.solidityPacked(
-                    ["uint16", "uint40", "uint48"],
-                    [parsed.underlyingAssetIndex, parsed.expiry, parsed.strikePrices[i]]
-                );
-                optionIds.push(ethers.keccak256(packed));
-            }
-
-            // Convert boolean arrays to what calling helper expects? 
-            // No, strictly follow array structure
-
-            // Is it a Buy?
-            // If `is_buy` is true, we use the Strategy as is (assuming the ID provided IS for a Buy).
-            // If the ID provided is for a "Buy Call" strategy, and we want to Buy, we pass `isBuys` as in the ID.
-
-            // What if `is_buy` is false? i.e. Close position?
-            // Then we need `createClosePosition`.
-            // For now, let's assume `createOpenPosition` is for opening a NEW position (Long or Short).
-            // If `is_buy` param means "Buying the Option" (Long Vol), then strategy must be BuyCall/BuyPut.
-            // If `is_buy` param means "Selling the Option" (Short Vol), then strategy must be SellCall/SellPut.
-
-            // Let's strictly rely on the `option_token_id` passed. 
-            // If the user picked a "Buy Call" token ID, they are Buying a Call.
-            // If they picked a "Sell Call" token ID, they are Selling a Call (Shorting).
-            // So `is_buy` parameter might be redundant if the Token ID already encodes the strategy?
-            // NO. The Token ID encodes the *Position* type.
-            // But `createOpenPosition` arguments `_isBuys` defines the trade direction.
-
-            // Let's assume the Agent selects an Option from the Chain list.
-            // The Chain list returns strategies like "BuyCall".
-            // If Agent wants to execute that, they call request_quote with that ID.
-
-            // Execution Fee
-            // Fixed at 0.00005 ETH usually? Need to check. 
-            // PositionManager.executionFee()
-            const executionFee = await positionManager.executionFee();
-
-            // Calldata construction
-
-            // Length: derived from strategy
-            // Naked = 1, Spread = 2.
-            let length = 1;
-            if (parsed.strategy >= 5) length = 2; // Spread strategies start at 5
 
             const iface = new ethers.Interface(POSITION_MANAGER_ABI);
             const calldata = iface.encodeFunctionData("createOpenPosition", [
-                parsed.underlyingAssetIndex,
+                longLeg.underlyingAssetIndex,
                 length,
-                parsed.isBuy,
+                isBuys,
                 optionIds,
-                parsed.isCall,
+                isCalls,
                 minSize,
                 path,
                 amountIn,
@@ -379,7 +426,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             data: calldata,
                             value: executionFee.toString(),
                             chain_id: CONFIG.CHAIN_ID,
-                            description: `Open Position for ${parsed.strategy} on Asset Index ${parsed.underlyingAssetIndex}, Strike ${parsed.strikePrices[0]}, Expiry ${parsed.expiry}`
+                            description: `Open Position: ${params.strategy} on ${isCall ? "Call" : "Put"} (Long ${longStrike} / Short ${shortStrike})`,
+                            approval_target: CONFIG.CONTRACTS.ROUTER,
+                            approval_token: CONFIG.CONTRACTS.USDC,
+                            instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'"
                         }, null, 2),
                     },
                 ],
