@@ -23,6 +23,15 @@ async function testS3Fetch() {
         console.log(`   BTC expiries: ${json.data.market.BTC.expiries.length}`);
         console.log(`   ETH expiries: ${json.data.market.ETH.expiries.length}`);
 
+        console.log("🔍 Inspecting BTC Market Data Fields:");
+        console.log(Object.keys(json.data.market.BTC));
+        console.log("spotPrice:", json.data.market.BTC.spotPrice);
+        console.log("indexPrice:", json.data.market.BTC.indexPrice);
+
+        const firstExpiry = json.data.market.BTC.expiries[0];
+        console.log("🔍 Inspecting First Option Data:");
+        console.log(json.data.market.BTC.options[firstExpiry].call[0]);
+
         let totalOptions = 0;
         for (const asset of ["BTC", "ETH"]) {
             for (const expiry of json.data.market[asset].expiries) {

@@ -138,37 +138,62 @@ Open http://localhost:6274 in your browser:
 
 ## 📊 Available Tools
 
-### `get_option_chains`
+### 1. Get Option Chains (`get_option_chains`)
 
-**Input:**
+Retrieve available **Vanilla Option** chains for a given underlying asset.
+
+> **⚠️ IMPORTANT TRADING RULE**:
+> The options returned by this tool are **Vanilla Options** (Single Legs).
+> However, **you cannot trade them individually**.
+> You **MUST** combine two vanilla options (one Long, one Short) to execute a **Spread Trade** via `request_quote`.
+
+**Request:**
 ```json
 {
-  "underlying_asset": "WETH"  // or "WBTC"
-}
-```
-
-**Output (Hierarchical Data):**
-```json
-{
-  "asset": "WETH",
-  "expiries": {
-    "14FEB26": {
-      "days": 1,
-      "call": [
-        { "s": 3000, "id": "123...", "p": "0.0500", "l": "1.2" },
-        { "s": 3100, "id": "124...", "p": "0.0200", "l": "0.8" }
-        // ... sorted by strike (Buy context)
-      ],
-      "put": [
-        { "s": 2800, "id": "125...", "p": "0.0100", "l": "1.0" }
-        // ... sorted by strike
-      ]
-    }
+  "name": "get_option_chains",
+  "arguments": {
+    "underlying_asset": "ETH"
   }
 }
 ```
-> **Structure:** Asset > Expiry > Call/Put > Strike List
-> **Data:** `s` (Strike), `id` (Leg Token ID), `p` (Mark Price), `l` (Liquidity)
+
+**Response:**
+Returns a hierarchical JSON object: `Asset -> Expiry -> Call/Put`.
+**Note:** The option list is a **Compact Array** `[Strike, Price, Liquidity, OptionID]` to save tokens.
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{
+        \"asset\": \"ETH\",
+        \"underlying_price\": 2500.50,
+        \"format\": \"[Strike, Price, Liquidity, OptionID]\",
+        \"expiries\": {
+          \"14FEB26\": {
+            \"days\": 2,
+            \"call\": [
+              [2400, 150.2, 12000, \"38482...\"],
+              [2500, 80.5, 5000, \"38491...\"]
+            ],
+            \"put\": [
+              [2300, 40.1, 8000, \"38501...\"]
+            ]
+          }
+        },
+        \"last_updated\": 1707890000
+      }"
+    }
+  ]
+}
+```
+
+**Trading Rules & Strategy:**
+1.  **Spread Only**: You MUST trade Spreads (Call Spread or Put Spread).
+2.  **Use Spot Price**: The response includes `underlying_price`. **Always select Strikes close to the Spot Price (ATM) or Out-of-the-Money (OTM).**
+    *   Avoid Deep In-The-Money (ITM) options (Strikes far below Spot for Calls, far above Spot for Puts) as they have low liquidity.
+3.  **Price Floor**: Net Spread Price must be ≥ **$60 (BTC)** or **$3 (ETH)**.
 
 ### `request_quote`
 

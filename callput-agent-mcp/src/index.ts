@@ -110,13 +110,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         tools: [
             {
                 name: "get_option_chains",
-                description: "Retrieve available option chains (liquidity and strikes) from the Callput protocol on Base L2.",
+                description: "Retrieve available vanilla option chains (Call/Put) from the Callput protocol. NOTE: These individual options are NOT tradable directly. You must combine a Long Leg and a Short Leg to create a Spread (Call Spread or Put Spread) using `request_quote`.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         underlying_asset: {
                             type: "string",
-                            description: "The underlying asset symbol (e.g., WETH). Retrieve option legs to construct Spreads (Call Spread / Put Spread). Single leg trading is disabled.",
+                            description: "The underlying asset symbol (e.g., WETH). Returns a list of vanilla options to be used as legs for constructing Spreads.",
                         },
                     },
                     required: ["underlying_asset"],
@@ -152,6 +152,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     };
 });
 
+// Helper to fetch S3 Data
+async function fetchMarketData() {
+    const S3_URL = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json";
+    const response = await fetch(S3_URL);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    return await response.json();
+}
+
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -181,15 +189,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             // 2. Fetch Market Data from S3
-            // Public S3 bucket for Callput.app market data
-            // https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json
-            const S3_URL = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json";
-
             let marketData;
             try {
-                const response = await fetch(S3_URL);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                marketData = await response.json();
+                marketData = await fetchMarketData();
             } catch (error) {
                 console.error("Failed to fetch S3 data:", error);
                 return {
@@ -212,24 +214,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             const assetMarket = marketData.data.market[assetName];
 
-            // 3. Parse options from S3 data → Hierarchical Slim JSON format
-            // Structure: Asset > Expiry > Call/Put > Buy > Strikes
-            // "Buy" is implied as the default action for these options.
+            // Estimate Spot Price using Deep ITM Call (Lowest Strike)
+            // Logic: For Deep ITM Call, Option Price ~= Spot Price - Strike Price
+            // So, Spot Price ~= Option Price + Strike Price
+            let spotPrice = 0;
+            if (assetMarket.expiries && assetMarket.expiries.length > 0) {
+                const firstExpiry = assetMarket.expiries[0];
+                const calls = assetMarket.options[firstExpiry]?.call || [];
+                if (calls.length > 0) {
+                    // Sort by strike to find lowest (Deep ITM)
+                    const sortedCalls = [...calls].sort((a: any, b: any) => a.strikePrice - b.strikePrice);
+                    const deepITMCall = sortedCalls[0];
+                    if (deepITMCall) {
+                        spotPrice = deepITMCall.strikePrice + (deepITMCall.markPrice || 0);
+                        // Clean to 2 decimals
+                        spotPrice = Math.round(spotPrice * 100) / 100;
+                    }
+                }
+            }
 
-            // Container for the hierarchy
+            // Min Price for *Short* legs can be lower, as long as the *Spread* is valuable.
+            // We set a dust threshold to avoid completely worthless options.
+            const dustThreshold = 0.1;
+
+            // 3. Parse options from S3 data → Compact Array format
+            // Structure: Asset > Expiry > Call/Put > [Strike, Price, Liquidity, ID]
+
             const hierarchy: Record<string, {
                 days: number,
-                call: any[],
-                put: any[]
+                // [Strike, Price, Liquidity, ID]
+                call: [number, number, number, string][],
+                put: [number, number, number, string][]
             }> = {};
 
-            const formatOption = (option: any) => {
-                return {
-                    s: option.strikePrice,       // Strike
-                    id: option.optionId,         // Token ID
-                    p: option.markPrice?.toFixed(4) || "0", // Price
-                    l: option.liquidity?.toFixed(4) || "0"  // Liquidity
-                };
+            const formatOption = (option: any): [number, number, number, string] => {
+                return [
+                    option.strikePrice,                                // Strike
+                    Number(option.markPrice?.toFixed(2) || "0"),       // Price (2 decimals sufficient for high level view)
+                    Number(option.liquidity?.toFixed(2) || "0"),       // Liquidity
+                    option.optionId                                    // Token ID
+                ];
             };
 
             for (const expiry of assetMarket.expiries || []) {
@@ -257,26 +281,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                 // Process Calls
                 for (const option of expiryOptions.call || []) {
-                    if (!option.isOptionAvailable) continue;
+                    if (!option.isOptionAvailable || (option.markPrice || 0) < dustThreshold) continue;
                     hierarchy[formattedExpiry].call.push(formatOption(option));
                 }
                 // Sort Calls by Strike ASC
-                hierarchy[formattedExpiry].call.sort((a, b) => a.s - b.s);
+                hierarchy[formattedExpiry].call.sort((a, b) => a[0] - b[0]);
 
                 // Process Puts
                 for (const option of expiryOptions.put || []) {
-                    if (!option.isOptionAvailable) continue;
+                    if (!option.isOptionAvailable || (option.markPrice || 0) < dustThreshold) continue;
                     hierarchy[formattedExpiry].put.push(formatOption(option));
                 }
-                // Sort Puts by Strike DESC (usual convention, or just ASC is fine)
-                hierarchy[formattedExpiry].put.sort((a, b) => a.s - b.s);
+                // Sort Puts by Strike ASC
+                hierarchy[formattedExpiry].put.sort((a, b) => a[0] - b[0]);
             }
-
-            // Sort Hierarchy Keys by Days to Expiry?
-            // Object keys in JS aren't strictly ordered, but we can't easily sort a map.
-            // However, the Agent will parse the JSON. 
-            // We can return a sorted array of objects if needed, but user asked for "Variable > Variable" hierarchy.
-            // A map `expiry -> data` is the best representation of that hierarchy.
 
             return {
                 content: [
@@ -284,8 +302,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         type: "text",
                         text: JSON.stringify({
                             asset: params.underlying_asset,
-                            // The hierarchy: Expiry Key -> { days, call: [...], put: [...] }
-                            // "Buy" is implicit in the list of available options.
+                            underlying_price: spotPrice,
+                            format: "[Strike, Price, Liquidity, OptionID]",
                             expiries: hierarchy,
                             last_updated: marketData.lastUpdatedAt,
                         }),
@@ -305,16 +323,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const params = Schema.parse(args);
 
             // Helpers to parse Token ID parts
-            // We need: underlyingAssetIndex, expiry, strikePrice
             const parseTokenId = (tokenIdStr: string) => {
                 const id = BigInt(tokenIdStr);
-                // Bit layout:
-                // [248bits unused][8bits unused][16bits asset][40bits expiry][48bits strike][1 bit isBuy][1 bit isCall][...remainder]
-                // Wait, `createOpenPosition` uses `optionId` as the key which is:
-                // keccak256(abi.encodePacked(underlying, expiry, strike))
-                // BUT the "id" we get from S3 is `optionId` (BigInt string) which is likely the *Position Token ID*?
-                // Let's re-verify `parseOptionTokenId` logic at top of file. 
-                // It unpacks 256 bits.
                 return parseOptionTokenId(id);
             };
 
@@ -329,46 +339,86 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 throw new Error("Legs must have same Expiry");
             }
 
-            // Strategy Validation
-            // BuyCallSpread: Long Lower Strike (Buy), Short Higher Strike (Sell)
-            // BuyPutSpread: Long Higher Strike (Buy), Short Lower Strike (Sell)
+            // Strategy Validation & Price Check
+            // 1. Fetch latest prices to validate Spread Value
+            let marketData;
+            try {
+                marketData = await fetchMarketData();
+            } catch (error) {
+                throw new Error("Failed to fetch fresh market data for price validation.");
+            }
+
+            const assetIndex = longLeg.underlyingAssetIndex;
+            // Map index to name (approximate, relying on config or just searching)
+            // But we can search data by Expiry directly if we knew the asset name.
+            // S3 structure keys are "BTC", "ETH".
+            // 1 = BTC, 2 = ETH (Usually, need to confirm).
+            // Let's deduce asset name from S3 data by checking which asset has this expiry & option ID.
+
+            let foundAsset: string | null = null;
+            let longOptionPrice = 0;
+            let shortOptionPrice = 0;
+            let foundLong = false;
+            let foundShort = false;
+
+            const assets = ["BTC", "ETH"];
+            for (const asset of assets) {
+                if (!marketData.data.market[asset]) continue;
+                const expiryStr = longLeg.expiry.toString(); // S3 expiry is string
+                const options = marketData.data.market[asset].options[expiryStr];
+                if (!options) continue;
+
+                // Search in Call and Put
+                const allOptions = [...(options.call || []), ...(options.put || [])];
+
+                const lOpt = allOptions.find((o: any) => o.optionId === params.long_leg_id);
+                if (lOpt) {
+                    foundAsset = asset;
+                    longOptionPrice = lOpt.markPrice || 0;
+                    foundLong = true;
+                }
+                const sOpt = allOptions.find((o: any) => o.optionId === params.short_leg_id);
+                if (sOpt) {
+                    shortOptionPrice = sOpt.markPrice || 0;
+                    foundShort = true;
+                }
+                if (foundLong && foundShort) break;
+            }
+
+            if (!foundLong || !foundShort || !foundAsset) {
+                throw new Error("Could not find Option IDs in latest market data. Options may be expired or invalid.");
+            }
+
+            // Check Spread Value
+            // Debit Spread Cost = Long Price - Short Price
+            const spreadCost = longOptionPrice - shortOptionPrice;
+
+            // Constraints
+            const minSpreadPrice = foundAsset === "BTC" ? 60 : 3;
+
+            if (spreadCost < minSpreadPrice) {
+                throw new Error(`Spread Price too low ($${spreadCost.toFixed(2)}). Minimum allowed is $${minSpreadPrice} for ${foundAsset}. Increase Long Strike or decrease Short Strike.`);
+            }
 
             // Check Call/Put consistency
             const isCall = params.strategy === "BuyCallSpread";
-            // Note: We skip checking longLeg.isCall/shortLeg.isCall from the ID 
-            // because S3 IDs might have bit flags set differently or strategy=0.
-            // We rely on the User/Agent's requested strategy.
-
-            // Check Strikes
             const longStrike = longLeg.strikePrices[0];
             const shortStrike = shortLeg.strikePrices[0];
 
             if (isCall) {
-                // Bull Call Spread: Buy Low, Sell High
-                if (longStrike >= shortStrike) throw new Error("For Bull Call Spread, Long Strike must be < Short Strike");
+                // Bull Call Spread: Buy Low (Long), Sell High (Short)
+                if (longStrike >= shortStrike) throw new Error("For Bull Call Spread, Long Strike must be < Short Strike (Buy Low, Sell High)");
             } else {
-                // Bull Put Spread (Credit) or Bear Put Spread (Debit)?
-                // Callput App "Put Spread" usually refers to Debit Put Spread (Bear Put Spread).
-                // Bear Put Spread: Buy High, Sell Low.
-                // Let's assume user wants Debit Spreads as per "Buy" keyword.
-                // Buy Put Spread = Long Put (High K) + Short Put (Low K) -> Net Debit.
-                if (longStrike <= shortStrike) throw new Error("For Bear Put Spread, Long Strike must be > Short Strike");
+                // Bear Put Spread: Buy High (Long), Sell Low (Short)
+                if (longStrike <= shortStrike) throw new Error("For Bear Put Spread, Long Strike must be > Short Strike (Buy High, Sell Low)");
             }
 
             // Construct Transaction Payload
-            // function createOpenPosition(...)
-            // Strikes: [Long, Short, 0, 0]
-            // isBuys: [true, false, false, false] (Buy Long, Sell Short)
-            // isCalls: [isCall, isCall, false, false]
-
             const strikes = [longStrike, shortStrike, 0, 0];
             const isBuys = [true, false, false, false];
             const isCalls = [isCall, isCall, false, false];
 
             // Reconstruct Option IDs to pass to contract
-            // The contract needs `keccak256(abi.encodePacked(underlying(uint16), expiry(uint40), strike(uint48)))`
-            // We can derive this from the legs.
-
             const generateOptionId = (assetIdx: number, expiry: number, strike: number) => {
                 if (strike === 0) return ethers.ZeroHash;
                 const packed = ethers.solidityPacked(
@@ -396,9 +446,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const decimals = await getDecimals(USDC);
             const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
 
-            // Spread strategies start at 5 (BuyCallSpread)
-            // But PositionManager determines logic by `length` and `isBuys`.
-            // We always send length=2 for Spreads.
             const length = 2;
             const minSize = 0n;
             const minOutWhenSwap = 0n;
@@ -426,7 +473,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             data: calldata,
                             value: executionFee.toString(),
                             chain_id: CONFIG.CHAIN_ID,
-                            description: `Open Position: ${params.strategy} on ${isCall ? "Call" : "Put"} (Long ${longStrike} / Short ${shortStrike})`,
+                            description: `Open Position: ${params.strategy} on ${foundAsset} (Long $${longStrike} / Short $${shortStrike}) | Cost: $${spreadCost.toFixed(2)}`,
                             approval_target: CONFIG.CONTRACTS.ROUTER,
                             approval_token: CONFIG.CONTRACTS.USDC,
                             instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'"

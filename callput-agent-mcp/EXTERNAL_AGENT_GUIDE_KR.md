@@ -148,23 +148,42 @@ npx @modelcontextprotocol/inspector node build/index.js
 ```
 
 **출력 (계층 구조 데이터):**
+**참고:** 토큰 절약을 위해 옵션 리스트는 **Compact Array** `[행사가, 가격, 유동성, 옵션ID]` 형태로 제공됩니다.
+
 ```json
 {
-  "asset": "WETH",
-  "expiries": {
-    "14FEB26": {
-      "days": 1,
-      "call": [
-        { "s": 3000, "id": "123...", "p": "0.0500", "l": "1.2" },
-        { "s": 3100, "id": "124...", "p": "0.0200", "l": "0.8" }
-      ],
-      "put": [
-        { "s": 2800, "id": "125...", "p": "0.0100", "l": "1.0" }
-      ]
+  "content": [
+    {
+      "type": "text",
+      "text": "{
+        \"asset\": \"ETH\",
+        \"underlying_price\": 2500.50,
+        \"format\": \"[Strike, Price, Liquidity, OptionID]\",
+        \"expiries\": {
+          \"14FEB26\": {
+            \"days\": 2,
+            \"call\": [
+              [2400, 150.2, 12000, \"38482...\"],
+              [2500, 80.5, 5000, \"38491...\"]
+            ],
+            \"put\": [
+              [2300, 40.1, 8000, \"38501...\"]
+            ]
+          }
+        },
+        \"last_updated\": 1707890000
+      }"
     }
-  }
+  ]
 }
 ```
+
+**거래 전략 및 규칙 (Strategy & Rules):**
+1.  **스프레드 필수**: 반드시 Spread 거래를 해야 합니다.
+2.  **현재가(Spot Price) 활용**: 응답에 포함된 `underlying_price`를 참고하세요.
+    *   **ATM(등가격) 또는 OTM(외가격) 위주로 선택하세요.**
+    *   Deep ITM(내가격이 깊은 옵션)은 유동성이 부족하여 거래 실패 확률이 높습니다. (예: 현재가보다 훨씬 낮은 행사가의 콜 옵션 ❌)
+3.  **최소 가격**: Spread Price ≥ **$60 (BTC)** / **$3 (ETH)**.
 
 ### `request_quote`
 
