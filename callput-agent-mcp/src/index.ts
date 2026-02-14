@@ -53,7 +53,7 @@ function parseOptionTokenId(optionTokenId: bigint): ParsedOption {
         isBuys[i] = ((optionTokenId >> (193n - BigInt(i * 48))) & 0x1n) !== 0n;
         const strike = Number((optionTokenId >> (147n - BigInt(i * 48))) & 0x3FFFFFFFFFFn);
         strikePrices[i] = strike;
-        isCall[i] = ((optionTokenId >> (146n - BigInt(i * 48))) & 0x1n) !== 0n;
+        isCall[i] = ((optionTokenId >> (146n - BigInt(i * 48))) & 0x1n) === 0n; // 0 = Call
     }
 
     const vaultIndex = Number(optionTokenId & 0x3n);
@@ -123,29 +123,75 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 },
             },
             {
+                name: "get_available_assets",
+                description: "List the underlying assets currently supported for option trading on Callput.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                },
+            },
+            {
+                name: "validate_spread",
+                description: "Check if a proposed spread trade is valid without executing it. Returns validation status and spread details.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        strategy: {
+                            type: "string",
+                            enum: ["BuyCallSpread", "BuyPutSpread"],
+                            description: "The strategy to validate.",
+                        },
+                        long_leg_id: {
+                            type: "string",
+                            description: "The Option Token ID for the Long Leg (Buy).",
+                        },
+                        short_leg_id: {
+                            type: "string",
+                            description: "The Option Token ID for the Short Leg (Sell).",
+                        },
+                    },
+                    required: ["strategy", "long_leg_id", "short_leg_id"],
+                },
+            },
+            {
                 name: "request_quote",
                 description: "Generate a transaction payload to buy/sell an option. Returns the calldata for PositionManager.createOpenPosition.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        option_token_id: {
+                        strategy: {
                             type: "string",
-                            description: "The Option Token ID (uint256 as string) retrieved from get_option_chains.",
+                            enum: ["BuyCallSpread", "BuyPutSpread"],
+                            description: "The strategy to execute. Currently only Call/Put Spreads are supported.",
+                        },
+                        long_leg_id: {
+                            type: "string",
+                            description: "The Option Token ID for the Long Leg (Buy).",
+                        },
+                        short_leg_id: {
+                            type: "string",
+                            description: "The Option Token ID for the Short Leg (Sell).",
                         },
                         amount: {
                             type: "number",
-                            description: "The amount of payment token (e.g. USDC or WETH) to spend (for Buy) or options to sell.",
+                            description: "The amount of USDC to spend (Premium).",
                         },
-                        is_buy: {
-                            type: "boolean",
-                            description: "True for Buy, False for Sell.",
-                        },
-                        slippage: {
-                            type: "number",
-                            description: "Slippage tolerance percentage (default 0.5%).",
-                        }
                     },
-                    required: ["option_token_id", "amount", "is_buy"],
+                    required: ["strategy", "long_leg_id", "short_leg_id", "amount"],
+                },
+            },
+            {
+                name: "get_greeks",
+                description: "Get Greeks (Delta, Gamma, Vega, Theta) and risk metrics for a specific Option Token ID.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        option_id: {
+                            type: "string",
+                            description: "The Option Token ID to look up.",
+                        },
+                    },
+                    required: ["option_id"],
                 },
             },
         ],
@@ -159,6 +205,169 @@ async function fetchMarketData() {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
 }
+
+// Helper for Validation
+async function validateSpreadLogic(
+    strategy: string,
+    longLegId: string,
+    shortLegId: string,
+    marketData: any
+): Promise<{ isValid: boolean; error?: string; details?: any }> {
+
+    let longLegParsed: ParsedOption | null = null;
+    let shortLegParsed: ParsedOption | null = null;
+    let longMetric: any = null;
+    let shortMetric: any = null;
+    let foundAsset = "";
+
+    const assets = Object.keys(marketData.data.market);
+    for (const asset of assets) {
+        const market = marketData.data.market[asset];
+        for (const expiry of market.expiries || []) {
+            const opts = market.options[expiry];
+            if (!opts) continue;
+
+            for (const leg of [...(opts.call || []), ...(opts.put || [])]) {
+                if (leg.optionId === longLegId && !longLegParsed) {
+                    longLegParsed = parseOptionTokenId(BigInt(leg.optionId));
+                    longMetric = leg;
+                    foundAsset = asset;
+                    // console.error(`[DEBUG] Long Leg: ${leg.optionId} | Price: ${leg.markPrice} | Strike: ${leg.strikePrice} | Vault: ${longLegParsed.vaultIndex}`);
+                }
+                if (leg.optionId === shortLegId && !shortLegParsed) {
+                    shortLegParsed = parseOptionTokenId(BigInt(leg.optionId));
+                    shortMetric = leg;
+                    // console.error(`[DEBUG] Short Leg: ${leg.optionId} | Price: ${leg.markPrice} | Strike: ${leg.strikePrice} | Vault: ${shortLegParsed.vaultIndex}`);
+                }
+                if (longLegParsed && shortLegParsed) break;
+            }
+            if (longLegParsed && shortLegParsed) break;
+        }
+        if (longLegParsed && shortLegParsed) break;
+    }
+
+    if (!longLegParsed || !shortLegParsed || !longMetric || !shortMetric) {
+        return { isValid: false, error: "One or both option legs not found in market data." };
+    }
+
+    // 2. Validate Consistency
+    if (longLegParsed.underlyingAssetIndex !== shortLegParsed.underlyingAssetIndex) {
+        return { isValid: false, error: "Legs must belong to the same underlying asset." };
+    }
+    // Expiry check
+    if (longLegParsed.expiry !== shortLegParsed.expiry) {
+        return { isValid: false, error: "Legs must have the same expiry." };
+    }
+
+    // Check if both are calls or both are puts
+    const longIsCall = Boolean(longLegParsed.isCall[0]);
+    const shortIsCall = Boolean(shortLegParsed.isCall[0]);
+
+    if (longIsCall !== shortIsCall) {
+        return { isValid: false, error: "Legs must be both Calls or both Puts." };
+    }
+
+    // 3. Validate Prices & Spread
+    const longPrice = longMetric.markPrice || 0;
+    const shortPrice = shortMetric.markPrice || 0;
+    const spreadCost = longPrice - shortPrice;
+
+    // Determine min spread price (BTC=60, ETH=3)
+    const minSpreadPrice = foundAsset === "BTC" ? 60 : 3;
+
+    if (spreadCost < minSpreadPrice) {
+        return {
+            isValid: false,
+            error: `Spread Price too low ($${spreadCost.toFixed(2)}). Minimum allowed is $${minSpreadPrice} for ${foundAsset}. Increase Long Strike or decrease Short Strike.`,
+            details: { spreadCost, minSpreadPrice }
+        };
+    }
+
+    // 4. Validate Strategy Direction
+    const longStrike = Number(longLegParsed.strikePrices[0]);
+    const shortStrike = Number(shortLegParsed.strikePrices[0]);
+    // 4. Strategy Type Check
+    // "BuyCallSpread", "SellCallSpread", "BuyPutSpread", "SellPutSpread"
+    const isCallSpread = strategy.includes("Call");
+
+    if (isCallSpread) {
+    } else { // Put Spread
+        // Put Spread: Buy High Strike, Sell Low Strike
+        if (longStrike <= shortStrike) {
+            return { isValid: false, error: `For Bear Put Spread, Long Strike ($${longStrike}) must be > Short Strike ($${shortStrike}) (Buy High, Sell Low)` };
+        }
+        if (longIsCall) return { isValid: false, error: "Strategy is Put Spread but options are Calls." };
+    }
+
+    // --- NEW: Calculate Available Quantity based on Vault Liquidity ---
+    let maxTradableQuantity = 0;
+    try {
+        const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+        const usdc = new ethers.Contract(CONFIG.CONTRACTS.USDC, ERC20_ABI, provider);
+
+        const vaultIndex = longLegParsed.vaultIndex;
+        const vaultAddress = getVaultAddress(vaultIndex);
+
+        // Fetch Vault Balance (USDC 6 decimals)
+        const balanceRaw = await usdc.balanceOf(vaultAddress);
+        const vaultBalance = Number(ethers.formatUnits(balanceRaw, 6));
+
+        let unitRequirement = 0;
+
+        if (strategy.startsWith("Buy")) {
+            // User Buys Spread -> Vault Sells Spread (Bear Spread).
+            // Vault needs Collateral = Difference in Strikes.
+            // (Conservatively ignoring premium received for now, or assume worst case)
+            // Note: Strike prices in OptionID are scaled by 32.
+            const tickSize = 32;
+            const strikeDiff = Math.abs(Number(longLegParsed.strikePrices[0]) - Number(shortLegParsed.strikePrices[0])) / tickSize;
+            unitRequirement = strikeDiff;
+        } else if (strategy.startsWith("Sell")) {
+            // User Sells Spread -> Vault Buys Spread.
+            // Vault pays Premium = Spread Price.
+            unitRequirement = Math.abs(spreadCost);
+        }
+
+        if (unitRequirement > 0) {
+            maxTradableQuantity = Math.floor(vaultBalance / unitRequirement);
+        } else {
+            maxTradableQuantity = 999999; // No requirement? Should not happen for valid spread
+        }
+
+        console.error(`Debug MaxQty: VaultBalance=${vaultBalance}, StrikeDiff=${unitRequirement}, MaxQty=${maxTradableQuantity}`);
+        // console.error(`Vault Balance: ${vaultBalance}, Unit Req: ${unitRequirement}, Max Qty: ${maxTradableQuantity}`);
+
+    } catch (e) {
+        console.error("Error calculating max quantity:", e);
+    }
+
+    return {
+        isValid: true,
+        details: {
+            asset: foundAsset,
+            spreadCost: spreadCost, // For Buy, this is debit. For Sell, this is credit.
+            longStrike: Number(longLegParsed.strikePrices[0]),
+            shortStrike: Number(shortLegParsed.strikePrices[0]),
+            longPrice: longPrice,
+            shortPrice: shortPrice,
+            expiry: longLegParsed.expiry,
+            maxTradableQuantity: maxTradableQuantity, // <--- Added
+            longLegParsed,
+            shortLegParsed
+        }
+    };
+}
+
+// Helper to get Vault Address
+const getVaultAddress = (index: number) => {
+    switch (index) {
+        case 0: return CONFIG.CONTRACTS.S_VAULT;
+        case 1: return CONFIG.CONTRACTS.M_VAULT;
+        case 2: return CONFIG.CONTRACTS.L_VAULT;
+        default: return CONFIG.CONTRACTS.S_VAULT; // Default to S
+    }
+};
+
 
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -233,6 +442,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
             }
 
+            // Fetch Vault Balances (Real Liquidity)
+            const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+            const usdc = new ethers.Contract(CONFIG.CONTRACTS.USDC, ERC20_ABI, provider);
+            const vaultBalances: number[] = [0, 0, 0]; // S, M, L
+
+            try {
+                const vaults = [CONFIG.CONTRACTS.S_VAULT, CONFIG.CONTRACTS.M_VAULT, CONFIG.CONTRACTS.L_VAULT];
+                const balances = await Promise.all(vaults.map(addr => usdc.balanceOf(addr)));
+
+                // USDC has 6 decimals
+                vaultBalances[0] = Number(ethers.formatUnits(balances[0], 6));
+                vaultBalances[1] = Number(ethers.formatUnits(balances[1], 6));
+                vaultBalances[2] = Number(ethers.formatUnits(balances[2], 6));
+
+                // console.error(`Vault Liquidity: S=${vaultBalances[0]}, M=${vaultBalances[1]}, L=${vaultBalances[2]}`);
+            } catch (e) {
+                console.error("Failed to fetch vault balances:", e);
+                // Continue with 0 liquidity if fetch fails
+            }
+
             // Min Price for *Short* legs can be lower, as long as the *Spread* is valuable.
             // We set a dust threshold to avoid completely worthless options.
             const dustThreshold = 0.1;
@@ -248,10 +477,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }> = {};
 
             const formatOption = (option: any): [number, number, number, string] => {
+                // Parse Vault Index from Option ID (Last 2 bits)
+                // We use BigInt to handle the full ID logic properly if needed, but for index masking,
+                // taking the last byte or so is safe enough in JS numbers if ID was string?
+                // OptionID is hex string.
+                const vaultIndex = Number(BigInt(option.optionId) & 0x3n);
+                const liquidity = vaultBalances[vaultIndex] || 0;
+
                 return [
                     option.strikePrice,                                // Strike
-                    Number(option.markPrice?.toFixed(2) || "0"),       // Price (2 decimals sufficient for high level view)
-                    Number(option.liquidity?.toFixed(2) || "0"),       // Liquidity
+                    Number(option.markPrice?.toFixed(2) || "0"),       // Price
+                    Number(liquidity.toFixed(2)),                      // Liquidity (Vault Balance)
                     option.optionId                                    // Token ID
                 ];
             };
@@ -312,9 +548,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             };
         }
 
+        if (name === "get_available_assets") {
+            // Currently static, but could dynamically check S3 in future
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            assets: ["BTC", "ETH"],
+                            description: "Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2."
+                        }),
+                    },
+                ],
+            };
+        }
+
+        if (name === "validate_spread") {
+            const Schema = z.object({
+                strategy: z.enum(["BuyCallSpread", "BuyPutSpread", "SellCallSpread", "SellPutSpread"]),
+                long_leg_id: z.string(),
+                short_leg_id: z.string(),
+            });
+            const params = Schema.parse(args);
+
+            const marketData = await fetchMarketData();
+            const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
+
+            if (!validation.isValid) {
+                return {
+                    content: [{ type: "text", text: `Validation Failed: ${validation.error}` }],
+                    isError: true
+                };
+            }
+
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                        status: "Valid",
+                        details: validation.details,
+                        message: "Spread is valid and tradable."
+                    })
+                }]
+            };
+        }
+
         if (name === "request_quote") {
             const Schema = z.object({
-                strategy: z.enum(["BuyCallSpread", "BuyPutSpread"]),
+                strategy: z.enum(["BuyCallSpread", "BuyPutSpread", "SellCallSpread", "SellPutSpread"]),
                 long_leg_id: z.string(),
                 short_leg_id: z.string(),
                 amount: z.number().positive(),
@@ -322,115 +603,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             });
             const params = Schema.parse(args);
 
-            // Helpers to parse Token ID parts
-            const parseTokenId = (tokenIdStr: string) => {
-                const id = BigInt(tokenIdStr);
-                return parseOptionTokenId(id);
-            };
+            // Fetch Market Data & Validate
+            const marketData = await fetchMarketData();
+            const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
 
-            const longLeg = parseTokenId(params.long_leg_id);
-            const shortLeg = parseTokenId(params.short_leg_id);
-
-            // Validation: Must be same Asset and Expiry
-            if (longLeg.underlyingAssetIndex !== shortLeg.underlyingAssetIndex) {
-                throw new Error("Legs must have same Underlying Asset");
-            }
-            if (longLeg.expiry !== shortLeg.expiry) {
-                throw new Error("Legs must have same Expiry");
+            if (!validation.isValid) {
+                throw new Error(validation.error);
             }
 
-            // Strategy Validation & Price Check
-            // 1. Fetch latest prices to validate Spread Value
-            let marketData;
-            try {
-                marketData = await fetchMarketData();
-            } catch (error) {
-                throw new Error("Failed to fetch fresh market data for price validation.");
-            }
+            const { longStrike, shortStrike, longLegParsed, shortLegParsed, asset: foundAsset, spreadCost } = validation.details;
 
-            const assetIndex = longLeg.underlyingAssetIndex;
-            // Map index to name (approximate, relying on config or just searching)
-            // But we can search data by Expiry directly if we knew the asset name.
-            // S3 structure keys are "BTC", "ETH".
-            // 1 = BTC, 2 = ETH (Usually, need to confirm).
-            // Let's deduce asset name from S3 data by checking which asset has this expiry & option ID.
-
-            let foundAsset: string | null = null;
-            let longOptionPrice = 0;
-            let shortOptionPrice = 0;
-            let foundLong = false;
-            let foundShort = false;
-
-            const assets = ["BTC", "ETH"];
-            for (const asset of assets) {
-                if (!marketData.data.market[asset]) continue;
-                const expiryStr = longLeg.expiry.toString(); // S3 expiry is string
-                const options = marketData.data.market[asset].options[expiryStr];
-                if (!options) continue;
-
-                // Search in Call and Put
-                const allOptions = [...(options.call || []), ...(options.put || [])];
-
-                const lOpt = allOptions.find((o: any) => o.optionId === params.long_leg_id);
-                if (lOpt) {
-                    foundAsset = asset;
-                    longOptionPrice = lOpt.markPrice || 0;
-                    foundLong = true;
-                }
-                const sOpt = allOptions.find((o: any) => o.optionId === params.short_leg_id);
-                if (sOpt) {
-                    shortOptionPrice = sOpt.markPrice || 0;
-                    foundShort = true;
-                }
-                if (foundLong && foundShort) break;
-            }
-
-            if (!foundLong || !foundShort || !foundAsset) {
-                throw new Error("Could not find Option IDs in latest market data. Options may be expired or invalid.");
-            }
-
-            // Check Spread Value
-            // Debit Spread Cost = Long Price - Short Price
-            const spreadCost = longOptionPrice - shortOptionPrice;
-
-            // Constraints
-            const minSpreadPrice = foundAsset === "BTC" ? 60 : 3;
-
-            if (spreadCost < minSpreadPrice) {
-                throw new Error(`Spread Price too low ($${spreadCost.toFixed(2)}). Minimum allowed is $${minSpreadPrice} for ${foundAsset}. Increase Long Strike or decrease Short Strike.`);
-            }
-
-            // Check Call/Put consistency
+            const longLeg = longLegParsed;
+            const shortLeg = shortLegParsed;
             const isCall = params.strategy === "BuyCallSpread";
-            const longStrike = longLeg.strikePrices[0];
-            const shortStrike = shortLeg.strikePrices[0];
-
-            if (isCall) {
-                // Bull Call Spread: Buy Low (Long), Sell High (Short)
-                if (longStrike >= shortStrike) throw new Error("For Bull Call Spread, Long Strike must be < Short Strike (Buy Low, Sell High)");
-            } else {
-                // Bear Put Spread: Buy High (Long), Sell Low (Short)
-                if (longStrike <= shortStrike) throw new Error("For Bear Put Spread, Long Strike must be > Short Strike (Buy High, Sell Low)");
-            }
 
             // Construct Transaction Payload
             const strikes = [longStrike, shortStrike, 0, 0];
             const isBuys = [true, false, false, false];
             const isCalls = [isCall, isCall, false, false];
 
-            // Reconstruct Option IDs to pass to contract
-            const generateOptionId = (assetIdx: number, expiry: number, strike: number) => {
-                if (strike === 0) return ethers.ZeroHash;
-                const packed = ethers.solidityPacked(
-                    ["uint16", "uint40", "uint48"],
-                    [assetIdx, expiry, strike]
-                );
-                return ethers.keccak256(packed);
-            };
-
+            // Use the provided Option IDs directly (S3 IDs are already correct packed integers)
+            // DO NOT regenerate them with keccak256, as that creates a hash mismatch.
             const optionIds = [
-                generateOptionId(longLeg.underlyingAssetIndex, longLeg.expiry, longStrike),
-                generateOptionId(longLeg.underlyingAssetIndex, longLeg.expiry, shortStrike),
+                params.long_leg_id,
+                params.short_leg_id,
                 ethers.ZeroHash,
                 ethers.ZeroHash
             ];
@@ -438,9 +634,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             // Execution Fee
             const executionFee = await positionManager.executionFee();
 
-            // Standard Path: [USDC] -> Vault
+            // Determine Vault from Long Leg Index
+            const vaultAddress = getVaultAddress(longLeg.vaultIndex);
+
+            // Path: [USDC, Vault]
             const USDC = CONFIG.CONTRACTS.USDC;
-            const path = [USDC];
+            const path = [USDC, vaultAddress];
 
             // Amount handling
             const decimals = await getDecimals(USDC);
@@ -477,6 +676,79 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             approval_target: CONFIG.CONTRACTS.ROUTER,
                             approval_token: CONFIG.CONTRACTS.USDC,
                             instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'"
+                        }, null, 2),
+                    },
+                ],
+            };
+        }
+
+        if (name === "get_greeks") {
+            const Schema = z.object({
+                option_id: z.string(),
+            });
+            const params = Schema.parse(args);
+            const targetId = params.option_id;
+
+            let marketData;
+            try {
+                marketData = await fetchMarketData();
+            } catch (error) {
+                return {
+                    content: [{ type: "text", text: "Error: Failed to fetch market data." }],
+                    isError: true,
+                };
+            }
+
+            let foundOption: any = null;
+            let foundAsset = "";
+
+            if (marketData.data && marketData.data.market) {
+                for (const asset of Object.keys(marketData.data.market)) {
+                    const market = marketData.data.market[asset];
+                    for (const expiry of market.expiries || []) {
+                        const opts = market.options[expiry];
+                        if (!opts) continue;
+
+                        // Check Calls and Puts
+                        const allOpts = [...(opts.call || []), ...(opts.put || [])];
+                        foundOption = allOpts.find((o: any) => o.optionId === targetId);
+
+                        if (foundOption) {
+                            foundAsset = asset;
+                            break;
+                        }
+                    }
+                    if (foundOption) break;
+                }
+            }
+
+            if (!foundOption) {
+                return {
+                    content: [{ type: "text", text: `Error: Option ID ${targetId} not found in current market data.` }],
+                    isError: true,
+                };
+            }
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            asset: foundAsset,
+                            instrument: foundOption.instrument,
+                            strike: foundOption.strikePrice,
+                            expiry: foundOption.expiry,
+                            type: foundOption.instrument.endsWith("-C") ? "Call" : "Put",
+                            mark_price: foundOption.markPrice,
+                            mark_iv: foundOption.markIv,
+                            greeks: {
+                                delta: foundOption.delta,
+                                gamma: foundOption.gamma,
+                                vega: foundOption.vega,
+                                theta: foundOption.theta
+                            },
+                            risk_premium_buy: foundOption.riskPremiumRateForBuy,
+                            risk_premium_sell: foundOption.riskPremiumRateForSell
                         }, null, 2),
                     },
                 ],

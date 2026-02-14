@@ -138,7 +138,31 @@ Open http://localhost:6274 in your browser:
 
 ## 📊 Available Tools
 
-### 1. Get Option Chains (`get_option_chains`)
+### 1. Get Available Assets (`get_available_assets`)
+
+List the underlying assets currently supported for option trading.
+
+**Request:**
+```json
+{
+  "name": "get_available_assets",
+  "arguments": {}
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2.\"}"
+    }
+  ]
+}
+```
+
+### 2. Get Option Chains (`get_option_chains`)
 
 Retrieve available **Vanilla Option** chains for a given underlying asset.
 
@@ -152,13 +176,13 @@ Retrieve available **Vanilla Option** chains for a given underlying asset.
 {
   "name": "get_option_chains",
   "arguments": {
-    "underlying_asset": "ETH"
+    "underlying_asset": "BTC"
   }
 }
 ```
 
 **Response:**
-Returns a hierarchical JSON object: `Asset -> Expiry -> Call/Put`.
+Returns a list of expiries and options. Note the `underlying_price` (Spot Price) to select appropriate ATM/OTM strikes.
 **Note:** The option list is a **Compact Array** `[Strike, Price, Liquidity, OptionID]` to save tokens.
 
 ```json

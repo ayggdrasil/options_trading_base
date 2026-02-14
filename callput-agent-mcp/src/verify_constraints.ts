@@ -22,6 +22,15 @@ async function runTest() {
         await client.connect(transport);
         console.log("✅ Connected to MCP Server");
 
+        // Step 0: Available Assets
+        console.log("\n0️⃣  Testing get_available_assets...");
+        const assetsResult: any = await client.callTool({
+            name: "get_available_assets",
+            arguments: {}
+        });
+        const assets = JSON.parse(assetsResult.content[0].text);
+        console.log("✅ Available Assets:", assets.assets);
+
         // Step 1: get_option_chains
         console.log("\n1️⃣  Testing get_option_chains...");
         const chainsResult: any = await client.callTool({

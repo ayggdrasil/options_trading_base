@@ -138,16 +138,66 @@ npx @modelcontextprotocol/inspector node build/index.js
 
 ## 📊 사용 가능한 툴 (Tools)
 
-### `get_option_chains`
+### 1. 거래 가능 자산 조회 (`get_available_assets`)
+
+현재 옵션 거래가 지원되는 기초 자산 목록을 조회합니다.
+
+**요청 (Request):**
+```json
+{
+  "name": "get_available_assets",
+  "arguments": {}
+}
+```
+
+**응답 (Response):
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2.\"}"
+    }
+  ]
+}
+```
+
+### 2. 옵션 체인 조회 (`get_option_chains`)
 
 **입력:**
 ```json
 {
-  "underlying_asset": "WETH"  // 또는 "WBTC"
+  "name": "get_option_chains",
+  "arguments": {
+    "underlying_asset": "BTC"
+  }
 }
 ```
 
-**출력 (계층 구조 데이터):**
+**응답:**
+만기일별 옵션 리스트와 `underlying_price`(현재가)를 반환합니다.
+
+### 3. 스프레드 유효성 검증 (`validate_spread`)
+
+실제 트랜잭션을 생성하기 전, 해당 스프레드 전략이 유효한지(가격 제약, 행사가 순서 등) 확인합니다.
+
+**요청 (Request):**
+```json
+{
+  "name": "validate_spread",
+  "arguments": {
+    "strategy": "BuyCallSpread",
+    "long_leg_id": "0x123...",
+    "short_leg_id": "0x456..."
+  }
+}
+```
+
+**응답 (Response):**
+*   **성공 시**: `status: "Valid"` 및 스프레드 예상 비용 포함.
+*   **실패 시**: `isError: true` 및 실패 사유 반환.
+
+### 4. 견적 요청 / 거래 생성 (`request_quote`):**
 **참고:** 토큰 절약을 위해 옵션 리스트는 **Compact Array** `[행사가, 가격, 유동성, 옵션ID]` 형태로 제공됩니다.
 
 ```json

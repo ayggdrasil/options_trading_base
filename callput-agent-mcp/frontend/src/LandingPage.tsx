@@ -96,12 +96,27 @@ const LandingPage = () => {
                                 name: 'Debit Call Spread', type: 'DEBIT', desc: 'Buy low call, sell high call. Bullish.', color: 'text-green-600', max: 'Max Profit: Strike Diff - Debit',
                                 graph: (
                                     <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
+                                        <defs>
+                                            <marker id="arrowhead-g" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+                                                <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a" />
+                                            </marker>
+                                            <marker id="arrowhead-r" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+                                                <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444" />
+                                            </marker>
+                                        </defs>
+                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="4" />
                                         <line x1="20" y1="10" x2="20" y2="110" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
-                                        <path d="M 20 100 L 80 100 L 140 20 L 180 20" fill="none" stroke="#16a34a" strokeWidth="2.5" /> {/* green-600 */}
+
+                                        {/* Loss Segment (Red) */}
+                                        <path d="M 20 100 L 80 100 L 110 60" fill="none" stroke="#ef4444" strokeWidth="2.5" />
+                                        {/* Profit Segment (Green) */}
+                                        <path d="M 110 60 L 140 20 L 180 20" fill="none" stroke="#16a34a" strokeWidth="2.5" />
+
                                         <text x="75" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K1</text>
                                         <text x="135" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K2</text>
-                                        <text x="100" y="50" fill="#16a34a" fontSize="11" fontWeight="600" textAnchor="middle">Profit ↑</text>
+
+                                        <text x="160" y="40" fill="#16a34a" fontSize="10" fontWeight="600" textAnchor="middle">Profit</text>
+                                        <text x="40" y="85" fill="#ef4444" fontSize="10" fontWeight="600" textAnchor="middle">Loss</text>
                                     </svg>
                                 )
                             },
@@ -109,12 +124,19 @@ const LandingPage = () => {
                                 name: 'Credit Call Spread', type: 'CREDIT', desc: 'Sell low call, buy high call. Bearish.', color: 'text-accent', max: 'Max Profit: Credit Received',
                                 graph: (
                                     <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
+                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="4" />
                                         <line x1="20" y1="10" x2="20" y2="110" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
-                                        <path d="M 20 20 L 80 20 L 140 100 L 180 100" fill="none" stroke="#D97757" strokeWidth="2.5" /> {/* accent */}
+
+                                        {/* Profit Segment (Green) */}
+                                        <path d="M 20 20 L 80 20 L 110 60" fill="none" stroke="#16a34a" strokeWidth="2.5" />
+                                        {/* Loss Segment (Red) */}
+                                        <path d="M 110 60 L 140 100 L 180 100" fill="none" stroke="#ef4444" strokeWidth="2.5" />
+
                                         <text x="75" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K1</text>
                                         <text x="135" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K2</text>
-                                        <text x="100" y="105" fill="#D97757" fontSize="11" fontWeight="600" textAnchor="middle">Loss ↓</text>
+
+                                        <text x="40" y="40" fill="#16a34a" fontSize="10" fontWeight="600" textAnchor="middle">Profit</text>
+                                        <text x="160" y="85" fill="#ef4444" fontSize="10" fontWeight="600" textAnchor="middle">Loss</text>
                                     </svg>
                                 )
                             },
@@ -122,12 +144,19 @@ const LandingPage = () => {
                                 name: 'Debit Put Spread', type: 'DEBIT', desc: 'Buy high put, sell low put. Bearish.', color: 'text-green-600', max: 'Max Profit: Strike Diff - Debit',
                                 graph: (
                                     <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
+                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="4" />
                                         <line x1="20" y1="10" x2="20" y2="110" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
-                                        <path d="M 20 20 L 60 20 L 120 100 L 180 100" fill="none" stroke="#16a34a" strokeWidth="2.5" /> {/* green-600 */}
+
+                                        {/* Profit Segment (Green) */}
+                                        <path d="M 20 20 L 60 20 L 90 60" fill="none" stroke="#16a34a" strokeWidth="2.5" />
+                                        {/* Loss Segment (Red) */}
+                                        <path d="M 90 60 L 120 100 L 180 100" fill="none" stroke="#ef4444" strokeWidth="2.5" />
+
                                         <text x="55" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K1</text>
                                         <text x="115" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K2</text>
-                                        <text x="100" y="30" fill="#16a34a" fontSize="11" fontWeight="600" textAnchor="middle">Profit ↑</text>
+
+                                        <text x="40" y="40" fill="#16a34a" fontSize="10" fontWeight="600" textAnchor="middle">Profit</text>
+                                        <text x="160" y="85" fill="#ef4444" fontSize="10" fontWeight="600" textAnchor="middle">Loss</text>
                                     </svg>
                                 )
                             },
@@ -135,12 +164,19 @@ const LandingPage = () => {
                                 name: 'Credit Put Spread', type: 'CREDIT', desc: 'Sell high put, buy low put. Bullish.', color: 'text-accent', max: 'Max Profit: Credit Received',
                                 graph: (
                                     <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
+                                        <line x1="20" y1="60" x2="180" y2="60" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="4" />
                                         <line x1="20" y1="10" x2="20" y2="110" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1" />
-                                        <path d="M 20 100 L 60 100 L 120 20 L 180 20" fill="none" stroke="#D97757" strokeWidth="2.5" /> {/* accent */}
+
+                                        {/* Loss Segment (Red) */}
+                                        <path d="M 20 100 L 60 100 L 90 60" fill="none" stroke="#ef4444" strokeWidth="2.5" />
+                                        {/* Profit Segment (Green) */}
+                                        <path d="M 90 60 L 120 20 L 180 20" fill="none" stroke="#16a34a" strokeWidth="2.5" />
+
                                         <text x="55" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K1</text>
                                         <text x="115" y="115" fill="currentColor" fillOpacity="0.5" fontSize="10" textAnchor="middle">K2</text>
-                                        <text x="100" y="90" fill="#D97757" fontSize="11" fontWeight="600" textAnchor="middle">Loss ↓</text>
+
+                                        <text x="160" y="40" fill="#16a34a" fontSize="10" fontWeight="600" textAnchor="middle">Profit</text>
+                                        <text x="40" y="85" fill="#ef4444" fontSize="10" fontWeight="600" textAnchor="middle">Loss</text>
                                     </svg>
                                 )
                             },
