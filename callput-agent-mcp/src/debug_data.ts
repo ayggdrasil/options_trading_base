@@ -63,7 +63,7 @@ async function main() {
         try {
             const fee = await pm.executionFee();
             console.log("✅ executionFee() returned:", fee.toString());
-        } catch (e) {
+        } catch (e: any) {
             console.error("❌ executionFee() failed:", e.message);
             // Suggest alternatives?
         }

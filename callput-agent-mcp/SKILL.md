@@ -23,6 +23,18 @@ Select a strategy based on market view:
 - **Bullish**: `BuyCallSpread` (Debit) or `SellPutSpread` (Credit).
 - **Bearish**: `BuyPutSpread` (Debit) or `SellCallSpread` (Credit).
 
+### Phase 2: Asset Discovery
+1. Call `get_available_assets` to list supported tokens (e.g., BTC, ETH).
+2. Call `get_option_chains` for a specific asset.
+   - Response contains **available** individual options (filtered by `isOptionAvailable` from protocol).
+   - Use these options to construct Spreads (Buy/Sell Call/Put Spreads).
+
+### Phase 3: Constructing a Strategy
+- **Bull Call Spread**: Buy Low Strike Call, Sell High Strike Call.
+- **Bear Put Spread**: Buy High Strike Put, Sell Low Strike Put.
+- **Bear Call Spread**: Sell Low Strike Call, Buy High Strike Call. (Credit Spread)
+- **Bull Put Spread**: Sell High Strike Put, Buy High Strike Call. (Credit Spread)
+
 ### Phase 3: Risk Management (Greeks)
 **Before Execution**:
 - Use `get_greeks(option_id)` for the legs you are interested in.
@@ -34,7 +46,9 @@ Select a strategy based on market view:
 ### Phase 4: Pre-Trade Validation (Mandatory)
 Before requesting a quote, you **MUST** validate the trade to check vault capacity.
 1. Call `validate_spread` with your proposed `long_leg_id` and `short_leg_id`.
-2.   - If `0`: The Vault has insufficient liquidity. **ABORT** or pick different strikes.
+2. **Check `maxTradableQuantity`** in the response.
+   - This value is calculated based on **OLP (Vault) Liquidity** and your Spread's collateral/premium requirement.
+   - If `0`: The Vault has insufficient liquidity. **ABORT** or pick different strikes.
    - If `> 0`: You may proceed with an amount up to this limit.
 
 ### Phase 5: Execution

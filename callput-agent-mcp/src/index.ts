@@ -93,6 +93,10 @@ const decimalsCache: Record<string, number> = {};
 
 async function getDecimals(tokenAddress: string): Promise<number> {
     if (decimalsCache[tokenAddress]) return decimalsCache[tokenAddress];
+
+    // Hardcode known tokens to prevent RPC rate-limit issues causing fallback to 18
+    if (tokenAddress.toLowerCase() === CONFIG.CONTRACTS.USDC.toLowerCase()) return 6;
+
     const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
     try {
         const decimals = await contract.decimals();
