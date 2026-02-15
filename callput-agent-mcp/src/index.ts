@@ -115,16 +115,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             {
                 name: "get_option_chains",
                 description: "Retrieve available vanilla option chains (Call/Put) from the Callput protocol. NOTE: These individual options are NOT tradable directly. You must combine a Long Leg and a Short Leg to create a Spread (Call Spread or Put Spread) using `request_quote`.",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        underlying_asset: {
-                            type: "string",
-                            description: "The underlying asset symbol (e.g., WETH). Returns a list of vanilla options to be used as legs for constructing Spreads.",
-                        },
-                    },
-                    required: ["underlying_asset"],
-                },
+                inputSchema: z.object({
+                    underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'WBTC', 'WETH')."),
+                    expiry_date: z.string().optional().describe("Filter by Expiry Date in format DDMMMYY (e.g., '14FEB26'). Returns all if omitted."),
+                    option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted."),
+                }),
             },
             {
                 name: "get_available_assets",
@@ -307,14 +302,21 @@ async function validateSpreadLogic(
     let maxTradableQuantity = 0;
     try {
         const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
-        const usdc = new ethers.Contract(CONFIG.CONTRACTS.USDC, ERC20_ABI, provider);
-
+        const vaultABI = [
+            "function poolAmounts(address token) external view returns (uint256)",
+            "function reservedAmounts(address token) external view returns (uint256)"
+        ];
         const vaultIndex = longLegParsed.vaultIndex;
         const vaultAddress = getVaultAddress(vaultIndex);
+        const vaultContract = new ethers.Contract(vaultAddress, vaultABI, provider);
 
-        // Fetch Vault Balance (USDC 6 decimals)
-        const balanceRaw = await usdc.balanceOf(vaultAddress);
-        const vaultBalance = Number(ethers.formatUnits(balanceRaw, 6));
+        // Fetch Vault State (Pool - Reserved)
+        const [pool, reserved] = await Promise.all([
+            vaultContract.poolAmounts(CONFIG.CONTRACTS.USDC),
+            vaultContract.reservedAmounts(CONFIG.CONTRACTS.USDC)
+        ]);
+        const availableRaw = pool - reserved;
+        const vaultBalance = Number(ethers.formatUnits(availableRaw > 0n ? availableRaw : 0n, 6));
 
         let unitRequirement = 0;
 
@@ -446,25 +448,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
             }
 
-            // Fetch Vault Balances (Real Liquidity)
+            // Fetch Vault State (Real Liquidity = Pool - Reserved)
+            // Buffer applies to Swaps, not Options? Verified in Vault.sol: BufferExceeded only in swap().
             const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
             const usdc = new ethers.Contract(CONFIG.CONTRACTS.USDC, ERC20_ABI, provider);
+            // We need Vault contract to check pool/reserved
+            const vaultABI = [
+                "function poolAmounts(address token) external view returns (uint256)",
+                "function reservedAmounts(address token) external view returns (uint256)"
+            ];
+
             const vaultBalances: number[] = [0, 0, 0]; // S, M, L
 
             try {
-                const vaults = [CONFIG.CONTRACTS.S_VAULT, CONFIG.CONTRACTS.M_VAULT, CONFIG.CONTRACTS.L_VAULT];
-                const balances = await Promise.all(vaults.map(addr => usdc.balanceOf(addr)));
+                const vaultAddrs = [CONFIG.CONTRACTS.S_VAULT, CONFIG.CONTRACTS.M_VAULT, CONFIG.CONTRACTS.L_VAULT];
+                const vaultContracts = vaultAddrs.map(addr => new ethers.Contract(addr, vaultABI, provider));
+                const usdcAddr = CONFIG.CONTRACTS.USDC;
+
+                const results = await Promise.all(vaultContracts.map(async (v) => {
+                    try {
+                        const [pool, reserved] = await Promise.all([
+                            v.poolAmounts(usdcAddr),
+                            v.reservedAmounts(usdcAddr)
+                        ]);
+                        // Available = Pool - Reserved
+                        const avail = pool - reserved;
+                        return avail > 0n ? avail : 0n;
+                    } catch (e) {
+                        console.error(`Failed to fetch vault state for ${v.target}:`, e);
+                        return 0n;
+                    }
+                }));
 
                 // USDC has 6 decimals
-                vaultBalances[0] = Number(ethers.formatUnits(balances[0], 6));
-                vaultBalances[1] = Number(ethers.formatUnits(balances[1], 6));
-                vaultBalances[2] = Number(ethers.formatUnits(balances[2], 6));
+                vaultBalances[0] = Number(ethers.formatUnits(results[0], 6));
+                vaultBalances[1] = Number(ethers.formatUnits(results[1], 6));
+                vaultBalances[2] = Number(ethers.formatUnits(results[2], 6));
 
-                // console.error(`Vault Liquidity: S=${vaultBalances[0]}, M=${vaultBalances[1]}, L=${vaultBalances[2]}`);
+                // console.error(`Available Liquidity: S=${vaultBalances[0]}, M=${vaultBalances[1]}, L=${vaultBalances[2]}`);
             } catch (e) {
                 console.error("Failed to fetch vault balances:", e);
-                // Continue with fallback liquidity so agent doesn't stop.
-                // Validate Spread tool will perform the strict check later.
+                // Fallback
                 vaultBalances[0] = 5000;
                 vaultBalances[1] = 5000;
                 vaultBalances[2] = 5000;
@@ -523,22 +547,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     };
                 }
 
-                // Process Calls
-                for (const option of expiryOptions.call || []) {
-                    if (!option.isOptionAvailable || (option.markPrice || 0) < dustThreshold) continue;
-                    hierarchy[formattedExpiry].call.push(formatOption(option));
-                }
-                // Sort Calls by Strike ASC
-                hierarchy[formattedExpiry].call.sort((a, b) => a[0] - b[0]);
+                // Center around Spot Price to avoid Context Overflow
+                // We collect ALL valid options first, then slice the relevant range (e.g., +/- 10 strikes around spot).
+                // Center around Spot Price to avoid Context Overflow
+                // We collect ALL valid options first, then slice the relevant range (e.g., +/- 10 strikes around spot).
+                const allCalls = (expiryOptions.call || [])
+                    .filter((o: any) => o.isOptionAvailable && (o.markPrice || 0) >= 0.01) // Restore isOptionAvailable as requested
+                    .map(formatOption)
+                    .sort((a: any[], b: any[]) => a[0] - b[0]); // Sort by Strike
 
-                // Process Puts
-                for (const option of expiryOptions.put || []) {
-                    if (!option.isOptionAvailable || (option.markPrice || 0) < dustThreshold) continue;
-                    hierarchy[formattedExpiry].put.push(formatOption(option));
+                const allPuts = (expiryOptions.put || [])
+                    .filter((o: any) => o.isOptionAvailable && (o.markPrice || 0) >= 0.01)
+                    .map(formatOption)
+                    .sort((a: any[], b: any[]) => a[0] - b[0]);
+
+                // Helper to slice around spot
+                const sliceAroundSpot = (options: [number, number, number, string][], spot: number, range: number) => {
+                    if (options.length <= range * 2) return options;
+                    // Find closest strike index
+                    let closestIdx = 0;
+                    let minDiff = Number.MAX_VALUE;
+                    for (let i = 0; i < options.length; i++) {
+                        const diff = Math.abs(options[i][0] - spot);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closestIdx = i;
+                        }
+                    }
+                    const start = Math.max(0, closestIdx - range);
+                    const end = Math.min(options.length, closestIdx + range + 1);
+                    return options.slice(start, end);
+                };
+
+                const range = 10; // +/- 10 strikes
+
+                // Filter by Option Type if specified
+                const p = params as any;
+
+                // Filter by Option Type if specified
+                if (!p.option_type || p.option_type === "Call") {
+                    hierarchy[formattedExpiry].call = sliceAroundSpot(allCalls, spotPrice, range);
+                } else {
+                    delete (hierarchy[formattedExpiry] as any).call; // Remove if not requested
                 }
-                // Sort Puts by Strike ASC
-                hierarchy[formattedExpiry].put.sort((a, b) => a[0] - b[0]);
+
+                if (!p.option_type || p.option_type === "Put") {
+                    hierarchy[formattedExpiry].put = sliceAroundSpot(allPuts, spotPrice, range);
+                } else {
+                    delete (hierarchy[formattedExpiry] as any).put;
+                }
+
+                // Filter by Expiry Date if specified
+                if (p.expiry_date && p.expiry_date.toUpperCase() !== formattedExpiry) {
+                    delete hierarchy[formattedExpiry];
+                }
             }
+
+            // Clean up empty expiries
+            Object.keys(hierarchy).forEach(key => {
+                if (hierarchy[key] && !hierarchy[key].call && !hierarchy[key].put) delete hierarchy[key];
+                // Also delete if both arrays are empty/undefined (though slice returns array)
+                if (hierarchy[key]) {
+                    const c = hierarchy[key].call || [];
+                    const p = hierarchy[key].put || [];
+                    if (c.length === 0 && p.length === 0) delete hierarchy[key];
+                }
+            });
 
             return {
                 content: [
@@ -548,6 +622,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             asset: params.underlying_asset,
                             underlying_price: spotPrice,
                             format: "[Strike, Price, Liquidity, OptionID]",
+                            note: "Showing ~20 strikes around Spot Price. Filtered by user request.",
                             expiries: hierarchy,
                             last_updated: marketData.lastUpdatedAt,
                         }),
@@ -557,18 +632,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (name === "get_available_assets") {
-            // Currently static, but could dynamically check S3 in future
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: JSON.stringify({
-                            assets: ["BTC", "ETH"],
-                            description: "Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2."
-                        }),
-                    },
-                ],
-            };
+            try {
+                const marketData = await fetchMarketData();
+                const assets = marketData.data?.market ? Object.keys(marketData.data.market) : [];
+
+                const assetDetails = assets.map(asset => {
+                    const market = marketData.data.market[asset];
+                    const expiries = (market.expiries || []).map((e: string) => {
+                        const d = new Date(Number(e) * 1000);
+                        // Format: DDMMMYY (e.g. 16FEB26)
+                        const day = String(d.getUTCDate()).padStart(2, '0');
+                        const month = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.getUTCMonth()];
+                        const year = String(d.getUTCFullYear()).slice(-2);
+                        return `${day}${month}${year}`;
+                    });
+
+                    return {
+                        asset: asset,
+                        expiries: expiries
+                    };
+                });
+
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify({
+                                assets: assetDetails,
+                                description: "List of supported assets and their available expiry dates."
+                            }, null, 2),
+                        },
+                    ],
+                };
+            } catch (error) {
+                return {
+                    content: [{ type: "text", text: "Error: Failed to fetch available assets." }],
+                    isError: true,
+                };
+            }
         }
 
         if (name === "validate_spread") {
@@ -654,7 +755,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
 
             const length = 2;
-            const minSize = 0n;
+            const minSize = 1n; // Enforce non-zero min size to prevent potential reverts
             const minOutWhenSwap = 0n;
 
             const iface = new ethers.Interface(POSITION_MANAGER_ABI);

@@ -17,19 +17,24 @@ The agent must have access to the following MCP tools:
 1. **Fetch Data**: Call `get_option_chains(asset="WBTC")`.
 2. **Analyze Board**: Look for liquidity (`Liquidity` field > 0) and favorable prices.
    - *Note*: `Liquidity` represents the Vault's available USDC balance.
-
 ### Phase 2: Strategy Selection
 Select a strategy based on market view:
 - **Bullish**: `BuyCallSpread` (Debit) or `SellPutSpread` (Credit).
 - **Bearish**: `BuyPutSpread` (Debit) or `SellCallSpread` (Credit).
 
-### Phase 2: Asset Discovery
-1. Call `get_available_assets` to list supported tokens (e.g., BTC, ETH).
-2. Call `get_option_chains` for a specific asset.
-   - Response contains **available** individual options (filtered by `isOptionAvailable` from protocol).
-   - Use these options to construct Spreads (Buy/Sell Call/Put Spreads).
+### 1. Market Analysis & Strategy Selection
+**Tools**: `get_available_assets`, `get_greeks`
 
-### Phase 3: Constructing a Strategy
+1.  **Check Market**: Call `get_available_assets` to see Assets & Expiry Dates.
+2.  **Select Strategy**: Decide on a view (Bull/Bear) and Strategy **BEFORE** fetching options.
+    - *Bullish*: Plan for **Bull Call Spread** (Debit) or **Bull Put Spread** (Credit).
+    - *Bearish*: Plan for **Bear Put Spread** (Debit) or **Bear Call Spread** (Credit).
+3.  **Fetch Relevant Options**: Call `get_option_chains`.
+    - Use `option_type="Call"` or `"Put"` based on your chosen strategy.
+    - **Check `MaxQty`**: The response includes `[Strike, Price, Liquidity, MaxQty, OptionID]`. 
+    - Ensure your trade size `< MaxQty` to avoid execution failure.
+
+### 2. Trade Construction (Spreads Only)
 - **Bull Call Spread**: Buy Low Strike Call, Sell High Strike Call.
 - **Bear Put Spread**: Buy High Strike Put, Sell Low Strike Put.
 - **Bear Call Spread**: Sell Low Strike Call, Buy High Strike Call. (Credit Spread)

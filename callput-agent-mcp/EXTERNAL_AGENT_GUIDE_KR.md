@@ -156,9 +156,14 @@ npx @modelcontextprotocol/inspector node build/index.js
   "content": [
     {
       "type": "text",
-      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2.\"}"
-    }
-  ]
+      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC)### 1단계: 전략 수립 및 탐색 (Strategy & Discovery)
+1.  **시장 확인**: `get_available_assets`로 자산과 만기일을 확인합니다.
+2.  **전략 선택**: 옵션을 조회하기 **전에** Bull/Bear 방향성과 전략(Call/Put)을 먼저 결정하십시오.
+3.  **옵션 조회**: `get_option_chains(asset, expiry, type)`를 호출합니다.
+    - 응답 형식: `[Strike, Price, Liquidity, MaxQty, OptionID]`
+    - **중요**: `MaxQty` (유동성 / 행사가)를 확인하여, 거래하려는 수량이 이보다 작은지 반드시 확인하십시오."arguments": {
+    "underlying_asset": "BTC"
+  }
 }
 ```
 

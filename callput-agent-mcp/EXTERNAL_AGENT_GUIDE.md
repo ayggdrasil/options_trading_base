@@ -138,6 +138,14 @@ Open http://localhost:6274 in your browser:
 
 ## 📊 Available Tools
 
+### Step 1: Strategy & Discovery
+1.  **Check Assets**: Call `get_available_assets` to see Assets & Expiry Dates.
+2.  **Decide Strategy**: Choose Bull/Bear & Call/Put **before** fetching chains.
+3.  **Get Chain**: Call `get_option_chains(asset, expiry, type)`.
+    - Returns `[Strike, Price, Liquidity, MaxQty, OptionID]`.
+    - **Crucial**: Verify `MaxQty` (calculated as `Liquidity / Strike`) is sufficient for your trade size.
+4.  **Analyze**: Use `get_greeks` for risk metrics.
+
 ### 1. Get Available Assets (`get_available_assets`)
 
 List the underlying assets currently supported for option trading.
