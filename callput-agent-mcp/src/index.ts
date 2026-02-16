@@ -170,6 +170,46 @@ server.registerTool(
 );
 
 server.registerTool(
+    "callput_get_my_positions",
+    {
+        description: "Fetch current open option positions and PnL for a given wallet address.",
+        inputSchema: {
+            address: z.string().describe("The wallet address to fetch positions for.")
+        }
+    },
+    async (args) => {
+        return await handleGetMyPositions(args as { address: string });
+    }
+);
+
+server.registerTool(
+    "callput_close_position",
+    {
+        description: "Generate a transaction payload to close (exit) an open option position.",
+        inputSchema: {
+            address: z.string().describe("User's wallet address."),
+            option_token_id: z.string().describe("The Option Token ID to close."),
+            size: z.string().describe("The amount of the position to close (as a string)."),
+            underlying_asset: z.string().describe("The underlying asset (e.g., 'WBTC', 'WETH').")
+        }
+    },
+    async (args) => {
+        return await handleClosePosition(args as { address: string; option_token_id: string; size: string; underlying_asset: string });
+    }
+);
+
+server.registerTool(
+    "callput_get_market_trends",
+    {
+        description: "Provide a high-level summary of current market trends, including BTC/ETH prices and IV levels.",
+        inputSchema: z.object({})
+    },
+    async () => {
+        return await handleGetMarketTrends();
+    }
+);
+
+server.registerTool(
     "callput_settle_position",
     {
         description: "Settle (close) an expired option position. Returns a transaction to sign.",
@@ -830,6 +870,191 @@ async function handleSettlePosition(params: { option_id: string; underlying_asse
     } catch (error: any) {
         return {
             content: [{ type: "text" as const, text: `Error generating settlement transaction: ${error.message}` }],
+            isError: true,
+        };
+    }
+}
+
+async function handleGetMyPositions(params: { address: string }): Promise<CallToolResult> {
+    try {
+        const { address } = params;
+        const MY_POSITION_API = "https://4wfz19irck.execute-api.ap-southeast-1.amazonaws.com/default/app-lambda-base-prod-query?method=getMyPositions&address=";
+        const response = await fetch(MY_POSITION_API + address);
+        if (!response.ok) throw new Error("Failed to fetch positions from Lambda.");
+        const result = await response.json();
+
+        // format result for readability: Simplify the structure
+        const positions: any[] = [];
+        ["BTC", "ETH"].forEach((asset: string) => {
+            const assetPositions = result[asset] || [];
+            assetPositions.forEach((gp: any) => {
+                gp.positions.forEach((pos: any) => {
+                    positions.push({
+                        asset,
+                        expiry: new Date(Number(gp.expiry) * 1000).toUTCString(),
+                        option_id: pos.optionTokenId,
+                        size: pos.size,
+                        avg_price: pos.executionPrice,
+                        is_buy: pos.isBuy,
+                        strategy: pos.strategy,
+                        is_settled: pos.isSettled,
+                        pnl: 0 // Calculation requires mark price from S3
+                    });
+                });
+            });
+        });
+
+        // Enrich with PnL if possible using market data
+        const marketData = await fetchMarketData();
+        positions.forEach(pos => {
+            const assetMark = marketData.data.market[pos.asset === "BTC" ? "BTC" : "ETH"];
+            if (assetMark) {
+                // Find mark price in S3
+                let found = false;
+                for (const expiry of assetMark.expiries || []) {
+                    const opts = assetMark.options[expiry];
+                    if (!opts) continue;
+                    const leg = [...(opts.call || []), ...(opts.put || [])].find(l => l.optionId === pos.option_id);
+                    if (leg) {
+                        const markPrice = leg.markPrice || 0;
+                        const execPrice = Number(pos.avg_price);
+                        pos.pnl = pos.is_buy ? (markPrice - execPrice) : (execPrice - markPrice);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        });
+
+        const output = {
+            account: address,
+            positions: positions,
+            total_active_count: positions.length
+        };
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: JSON.stringify(output, null, 2)
+            }],
+            structuredContent: output
+        };
+    } catch (error: any) {
+        return {
+            content: [{ type: "text" as const, text: `Error fetching positions: ${error.message}` }],
+            isError: true,
+        };
+    }
+}
+
+async function handleClosePosition(params: { address: string; option_token_id: string; size: string; underlying_asset: string }): Promise<CallToolResult> {
+    try {
+        const { option_token_id, size, underlying_asset } = params;
+        // Use raw asset name as config keys are WBTC/WETH
+        const assetName = underlying_asset;
+
+        const assetConfig = CONFIG.ASSETS[assetName as keyof typeof CONFIG.ASSETS];
+        if (!assetConfig) throw new Error(`Invalid underlying asset: ${underlying_asset}`);
+
+        // Close Params: uint16 _underlyingAssetIndex, bytes32 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawETH
+        const USDC = CONFIG.CONTRACTS.USDC;
+        const path = [USDC]; // Swap profit to USDC
+        const minAmountOut = 0n;
+        const minOutWhenSwap = 0n;
+        const withdrawETH = false;
+
+        const iface = new ethers.Interface(POSITION_MANAGER_ABI);
+        const optionIdHex = ethers.zeroPadValue(ethers.toBeHex(BigInt(option_token_id)), 32);
+
+        const data = iface.encodeFunctionData("createClosePosition", [
+            assetConfig.index,
+            optionIdHex,
+            BigInt(size),
+            path,
+            minAmountOut,
+            minOutWhenSwap,
+            withdrawETH
+        ]);
+
+        const executionFee = await positionManager.executionFee();
+
+        const output = {
+            to: CONFIG.CONTRACTS.POSITION_MANAGER,
+            data: data,
+            value: executionFee.toString(),
+            chain_id: CONFIG.CHAIN_ID,
+            description: `Close position for Option ID ${option_token_id} | Size: ${size}`,
+            instruction: "Sign this transaction to exit the position."
+        };
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: JSON.stringify(output, null, 2)
+            }],
+            structuredContent: output
+        };
+    } catch (error: any) {
+        return {
+            content: [{ type: "text" as const, text: `Error generating close transaction: ${error.message}` }],
+            isError: true,
+        };
+    }
+}
+
+async function handleGetMarketTrends(): Promise<CallToolResult> {
+    try {
+        const marketData = await fetchMarketData();
+        const trends: any = {};
+
+        ["BTC", "ETH"].forEach(asset => {
+            const m = marketData.data.market[asset];
+            if (!m) return;
+
+            // Calculate Average IV across all expiries/strikes
+            let totalIv = 0;
+            let count = 0;
+            for (const expiry of m.expiries || []) {
+                const optionsAtExpiry = m.options[expiry] || {};
+                const allOptions = [...(optionsAtExpiry.call || []), ...(optionsAtExpiry.put || [])];
+                allOptions.forEach((o: any) => {
+                    if (o.iv && o.iv > 0) {
+                        totalIv += o.iv;
+                        count++;
+                    }
+                });
+            }
+            const avgIv = count > 0 ? (totalIv / count) : 0;
+
+            // Spot Price Estimator (from chains)
+            let spot = 0;
+            if (m.expiries && m.expiries.length > 0) {
+                const c = m.options[m.expiries[0]]?.call || [];
+                if (c.length > 0) {
+                    // Use At-The-Money or the first strike
+                    const itm = c.sort((a: any, b: any) => a.strikePrice - b.strikePrice)[0];
+                    spot = itm.strikePrice + (itm.markPrice || 0);
+                }
+            }
+
+            trends[asset] = {
+                spot_price: Math.round(spot * 100) / 100,
+                avg_iv: Math.round(avgIv * 100) / 100,
+                sentiment: avgIv > 0.8 ? "High Vola / Bearish" : (avgIv > 0 ? "Stable / Neutral" : "Low Vola / Sideways"),
+                last_updated: marketData.lastUpdatedAt
+            };
+        });
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: JSON.stringify(trends, null, 2)
+            }],
+            structuredContent: trends
+        };
+    } catch (error: any) {
+        return {
+            content: [{ type: "text" as const, text: `Error fetching trends: ${error.message}` }],
             isError: true,
         };
     }

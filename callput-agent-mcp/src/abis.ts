@@ -17,6 +17,7 @@ export const VAULT_ABI = [
 
 export const POSITION_MANAGER_ABI = [
     "function createOpenPosition(uint16 _underlyingAssetIndex, uint8 _length, bool[4] memory _isBuys, bytes32[4] memory _optionIds, bool[4] memory _isCalls, uint256 _minSize, address[] memory _path, uint256 _amountIn, uint256 _minOutWhenSwap, address _leadTrader) external payable returns (bytes32)",
+    "function createClosePosition(uint16 _underlyingAssetIndex, bytes32 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawETH) external payable returns (bytes32)",
     "function executionFee() view returns (uint256)",
 ];
 

@@ -48,10 +48,17 @@ This skill provides specialized capability to trade on-chain options on the Call
     -   *Purpose*: Generates the unsigned transaction to Open or Close a position.
     -   *Note*: Requires user approval to sign.
 
-### 4. Settlement
--   `callput_settle_position(option_id, underlying_asset)`:
-    -   *Purpose*: Settle (claim profit/collateral) for an **expired** position.
-    -   *Use when*: User asks to "settle" or "exercise" post-expiry.
+### 4. Settlement (Expired)
+- `callput_settle_position(option_id, underlying_asset)`:
+    - *Purpose*: Settle (claim profit/collateral) for an **expired** position.
+
+### 5. Monitoring & Exit (Active)
+- `callput_get_my_positions(address)`:
+    - *Purpose*: View open positions, holding sizes, and real-time PnL.
+- `callput_close_position(address, option_id, size, underlying_asset)`:
+    - *Purpose*: Exit a position **before expiry** (Take Profit / Stop Loss).
+- `callput_get_market_trends()`:
+    - *Purpose*: Get a high-level summary of BTC/ETH IV and spot prices to decide on exits.
 
 ## Standard Operating Procedure (SOP)
 
@@ -96,13 +103,18 @@ if (validation.maxTradableQuantity > 0) {
 1.  Call `callput_request_quote` with the IDs and Amount.
 2.  Output the transaction to the user for signing.
 
-### Phase 5: Settlement (Post-Expiry)
+### Phase 5: Monitoring & Risk Management
+1.  Periodically call `callput_get_my_positions(address)`.
+2.  Check PnL and Delta exposure.
+3.  Check `callput_get_market_trends()` for IV spikes. If IV is extremely high, consider selling (closing) long positions to harvest "IV Crush".
 
-If a user holds a position past expiry:
-1.  Call `callput_settle_position(option_id, asset)`.
-2.  This generates a transaction to claim any profits.
+### Phase 6: Exit (Close or Settle)
+-   **Manual Exit**: Call `callput_close_position` if PnL target is reached or Stop-Loss is triggered.
+-   **Expiry**: If held until expiry, call `callput_settle_position`.
 
 ## Common Pitfalls
+
+-   **Stop-Loss**: Agents should implement their own stop-loss logic using `get_my_positions` and `close_position`.
 
 -   **Liquidity = 0**: The `Liquidity` field in option chains is the Vault's USDC balance. If it's low, large trades will fail. Always check `maxTradableQuantity` in validation.
 -   **Deep ITM**: Deep In-The-Money options often have wide spreads or low liquidity. Prefer ATM (At-The-Money) or slightly OTM (Out-of-The-Money).
