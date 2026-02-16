@@ -78,7 +78,7 @@ await client.connect(transport);
 
 // Query options
 const result = await client.callTool({
-  name: "get_option_chains",
+  name: "callput_get_option_chains",
   arguments: { underlying_asset: "WETH" }
 });
 
@@ -106,7 +106,7 @@ request = {
     "id": 1,
     "method": "tools/call",
     "params": {
-        "name": "get_option_chains",
+        "name": "callput_get_option_chains",
         "arguments": {"underlying_asset": "WETH"}
     }
 }
@@ -130,7 +130,7 @@ npx @modelcontextprotocol/inspector node build/index.js
 ```
 
 Open http://localhost:6274 in your browser:
-1. Select the `get_option_chains` tool.
+1. Select the `callput_get_option_chains` tool.
 2. Enter `{"underlying_asset": "WETH"}` as arguments.
 3. **Verify you see 200+ options!** ✅
 
@@ -139,21 +139,21 @@ Open http://localhost:6274 in your browser:
 ## 📊 Available Tools
 
 ### Step 1: Strategy & Discovery
-1.  **Check Assets**: Call `get_available_assets` to see Assets & Expiry Dates.
+1.  **Check Assets**: Call `callput_get_available_assets` to see Assets & Expiry Dates.
 2.  **Decide Strategy**: Choose Bull/Bear & Call/Put **before** fetching chains.
-3.  **Get Chain**: Call `get_option_chains(asset, expiry, type)`.
+3.  **Get Chain**: Call `callput_get_option_chains(asset, expiry, type)`.
     - Returns `[Strike, Price, Liquidity, MaxQty, OptionID]`.
     - **Crucial**: Verify `MaxQty` (calculated as `Liquidity / Strike`) is sufficient for your trade size.
-4.  **Analyze**: Use `get_greeks` for risk metrics.
+4.  **Analyze**: Use `callput_get_greeks` for risk metrics.
 
-### 1. Get Available Assets (`get_available_assets`)
+### 1. Get Available Assets (`callput_get_available_assets`)
 
 List the underlying assets currently supported for option trading.
 
 **Request:**
 ```json
 {
-  "name": "get_available_assets",
+  "name": "callput_get_available_assets",
   "arguments": {}
 }
 ```
@@ -170,19 +170,19 @@ List the underlying assets currently supported for option trading.
 }
 ```
 
-### 2. Get Option Chains (`get_option_chains`)
+### 2. Get Option Chains (`callput_get_option_chains`)
 
 Retrieve available **Vanilla Option** chains for a given underlying asset.
 
 > **⚠️ IMPORTANT TRADING RULE**:
 > The options returned by this tool are **Vanilla Options** (Single Legs).
 > However, **you cannot trade them individually**.
-> You **MUST** combine two vanilla options (one Long, one Short) to execute a **Spread Trade** via `request_quote`.
+> You **MUST** combine two vanilla options (one Long, one Short) to execute a **Spread Trade** via `callput_request_quote`.
 
 **Request:**
 ```json
 {
-  "name": "get_option_chains",
+  "name": "callput_get_option_chains",
   "arguments": {
     "underlying_asset": "BTC"
   }
@@ -227,7 +227,7 @@ Returns a list of expiries and options. Note the `underlying_price` (Spot Price)
     *   Avoid Deep In-The-Money (ITM) options (Strikes far below Spot for Calls, far above Spot for Puts) as they have low liquidity.
 3.  **Price Floor**: Net Spread Price must be ≥ **$60 (BTC)** or **$3 (ETH)**.
 
-### `request_quote`
+### `callput_request_quote`
 
 Enforces **Spread Trading** (Callput.app style). Single leg trading is disabled to ensure safety.
 

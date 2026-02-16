@@ -1,74 +1,109 @@
-# Skill: Callput Option Trader
+---
+name: callput-option-trader
+description: Comprehensive toolset for analyzing and trading on-chain options via the Callput protocol on Base L2. Use this skill when the user wants to trade options, analyze option market data (IV, Greeks), execute spread strategies (Bull Call, Bear Put, etc.), or manage existing positions (settle/close).
+license: MIT
+---
 
-## Description
-This skill grants the agent the capability to trade on-chain options via the Callput protocol on Base L2. It specializes in **Spread Trading** (Bull Call, Bear Put, Credit Spreads) to maximize capital efficiency and limit risk.
+# Callput Option Trader
+
+This skill provides specialized capability to trade on-chain options on the Callput protocol.
+
+## Workflow overview
+
+1.  **Market Analysis**: Identify opportunities using `callput_get_available_assets`.
+2.  **Option Search**: Fetch option chains for a selected asset using `callput_get_option_chains`.
+3.  **Strategy Selection & Filtering**:
+    -   Select a strategy (e.g., Bull Call Spread).
+    -   **Critical**: Filter candidates by Greeks (Delta, Gamma) using `callput_get_greeks` *before* decision.
+4.  **Execution** (Open/Close/Settle):
+    -   **Validation**: Use `callput_validate_spread` to check liquidity and validity.
+    -   **Trade**: Use `callput_request_quote` to generate the transaction.
+    -   **Settle**: Use `callput_settle_position` for expired positions.
+
+## Core Principles
+
+-   **Spreads Only**: The protocol (and this agent) specializes in Spreads (Vertical Spreads) for capital efficiency. Single leg trading is generally discouraged or not supported by these tools.
+-   **Validation First**: Always dry-run a trade with `validate_spread` to check for Vault liquidity (`maxTradableQuantity`).
+-   **Greek-Driven**: Do not just pick random strikes. Use Delta and Theta to align with the market view.
 
 ## Tools
-The agent must have access to the following MCP tools:
-- `get_available_assets`: Check supported tokens (BTC, ETH).
-- `get_option_chains`: Fetch real-time option board (Strike, Price, Liquidity).
-- `validate_spread`: **CRITICAL**. Checks spread validity, calculates collateral/premium, and determines `maxTradableQuantity` based on Vault liquidity.
-- `request_quote`: Generates the unsigned transaction payload for execution.
-- `get_greeks`: **NEW**. Check Delta, Gamma, Vega, Theta for specific Option IDs.
+
+### 1. Market Discovery
+-   `callput_get_available_assets`: Returns list of supported assets (e.g., BTC, ETH) and their expiry dates.
+    -   *Use when*: Starting a session to see what is tradable.
+
+### 2. Option Chain & Analysis
+-   `callput_get_option_chains(underlying_asset, expiry_date, option_type)`: Returns the option board.
+    -   **Output**: `[Strike, Price, Liquidity, MaxQty, OptionID]`
+    -   *Use when*: You need to see prices and available strikes.
+-   `callput_get_greeks(option_id)`: **Crucial for professional trading**.
+    -   **Returns**: Delta, Gamma, Vega, Theta, IV.
+    -   *Use when*: Filtering strikes. Example: "Find me a Call with Delta 0.3".
+
+### 3. Validation & Execution
+-   `callput_validate_spread(strategy, long_leg_id, short_leg_id)`:
+    -   *Purpose*: Checks if the spread is valid and if the Vault has enough liquidity.
+    -   **Output**: `maxTradableQuantity`. If this is 0, **DO NOT PROCEED**.
+-   `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`:
+    -   *Purpose*: Generates the unsigned transaction to Open or Close a position.
+    -   *Note*: Requires user approval to sign.
+
+### 4. Settlement
+-   `callput_settle_position(option_id, underlying_asset)`:
+    -   *Purpose*: Settle (claim profit/collateral) for an **expired** position.
+    -   *Use when*: User asks to "settle" or "exercise" post-expiry.
 
 ## Standard Operating Procedure (SOP)
 
-### Phase 1: Market Analysis
-1. **Fetch Data**: Call `get_option_chains(asset="WBTC")`.
-2. **Analyze Board**: Look for liquidity (`Liquidity` field > 0) and favorable prices.
-   - *Note*: `Liquidity` represents the Vault's available USDC balance.
-### Phase 2: Strategy Selection
-Select a strategy based on market view:
-- **Bullish**: `BuyCallSpread` (Debit) or `SellPutSpread` (Credit).
-- **Bearish**: `BuyPutSpread` (Debit) or `SellCallSpread` (Credit).
+### Phase 1: Analysis & Selection
 
-### 1. Market Analysis & Strategy Selection
-**Tools**: `get_available_assets`, `get_greeks`
+1.  **Identify Asset**: `callput_get_available_assets()` -> User selects e.g., "BTC".
+2.  **Fetch Chain**: `callput_get_option_chains(underlying_asset="BTC")`.
+3.  **Analyze Greeks**:
+    -   Iterate through interesting strikes.
+    -   Call `callput_get_greeks(option_id)` for candidates.
+    -   *Example*: "I want a Long Call Leg with Delta ~0.5".
 
-1.  **Check Market**: Call `get_available_assets` to see Assets & Expiry Dates.
-2.  **Select Strategy**: Decide on a view (Bull/Bear) and Strategy **BEFORE** fetching options.
-    - *Bullish*: Plan for **Bull Call Spread** (Debit) or **Bull Put Spread** (Credit).
-    - *Bearish*: Plan for **Bear Put Spread** (Debit) or **Bear Call Spread** (Credit).
-3.  **Fetch Relevant Options**: Call `get_option_chains`.
-    - Use `option_type="Call"` or `"Put"` based on your chosen strategy.
-    - **Check `MaxQty`**: The response includes `[Strike, Price, Liquidity, MaxQty, OptionID]`. 
-    - Ensure your trade size `< MaxQty` to avoid execution failure.
+### Phase 2: Strategy Construction
 
-### 2. Trade Construction (Spreads Only)
-- **Bull Call Spread**: Buy Low Strike Call, Sell High Strike Call.
-- **Bear Put Spread**: Buy High Strike Put, Sell Low Strike Put.
-- **Bear Call Spread**: Sell Low Strike Call, Buy High Strike Call. (Credit Spread)
-- **Bull Put Spread**: Sell High Strike Put, Buy High Strike Call. (Credit Spread)
+Select a Spread Strategy based on Greeks and View:
 
-### Phase 3: Risk Management (Greeks)
-**Before Execution**:
-- Use `get_greeks(option_id)` for the legs you are interested in.
-- **Delta**: Measures directional risk.
-- **Gamma**: Measures convexity (acceleration of Delta).
-- **Theta**: Time decay (Sell strategies want high Theta).
-- **Vega**: Volatility sensitivity.
+| View | Strategy | Structure |
+| :--- | :--- | :--- |
+| **Bullish** | **Bull Call Spread** | Buy Low Strike Call + Sell High Strike Call |
+| **Bearish** | **Bear Put Spread** | Buy High Strike Put + Sell Low Strike Put |
+| **Neutral/Range** | *Credit Spreads* | (Advanced) Sell OTM Put Spread or Call Spread |
 
-### Phase 4: Pre-Trade Validation (Mandatory)
-Before requesting a quote, you **MUST** validate the trade to check vault capacity.
-1. Call `validate_spread` with your proposed `long_leg_id` and `short_leg_id`.
-2. **Check `maxTradableQuantity`** in the response.
-   - This value is calculated based on **OLP (Vault) Liquidity** and your Spread's collateral/premium requirement.
-   - If `0`: The Vault has insufficient liquidity. **ABORT** or pick different strikes.
-   - If `> 0`: You may proceed with an amount up to this limit.
+### Phase 3: Pre-Trade Validation (MANDATORY)
 
-### Phase 5: Execution
-1. Call `request_quote` with the successful IDs and a valid `amount` (<= maxTradableQuantity).
-2. The tool returns a transaction object (`to`, `data`).
-3. **Action**: Sign and broadcast this transaction.
+**Before requesting a quote**, you MUST run validation:
 
-## Error Handling
-- **"Spread Price too low"**: The spread is narrower than the minimum tick allowed. Widen the strikes.
-- **"Liquidity is 0"**: The specific Vault for the Long Leg is empty. Try a different expiry or strike range that might map to a different Vault (S/M/L).
-- **Rate Limits**: If tools fail/timeout, wait 2-5 seconds before retrying.
+```javascript
+// Example: Checking a Bull Call Spread
+const validation = await callput_validate_spread({
+  strategy: "BuyCallSpread",
+  long_leg_id: "0x123...", 
+  short_leg_id: "0x456..."
+});
 
-## Example Reasoning Loop
-> "I want to long BTC. I see a Call Spread $63k/$64k.
-> 1. `validate_spread` confirms it is valid and Max Qty is 16.
-> 2. I have budget for 5 contracts. 5 < 16, so it's safe.
-> 3. Calling `request_quote(amount=5)`.
-> 4. Transaction generated. Sending..."
+if (validation.maxTradableQuantity > 0) {
+  // Safe to proceed
+}
+```
+
+### Phase 4: Execution
+
+1.  Call `callput_request_quote` with the IDs and Amount.
+2.  Output the transaction to the user for signing.
+
+### Phase 5: Settlement (Post-Expiry)
+
+If a user holds a position past expiry:
+1.  Call `callput_settle_position(option_id, asset)`.
+2.  This generates a transaction to claim any profits.
+
+## Common Pitfalls
+
+-   **Liquidity = 0**: The `Liquidity` field in option chains is the Vault's USDC balance. If it's low, large trades will fail. Always check `maxTradableQuantity` in validation.
+-   **Deep ITM**: Deep In-The-Money options often have wide spreads or low liquidity. Prefer ATM (At-The-Money) or slightly OTM (Out-of-The-Money).
+-   **Approvals**: The user must approve the `ROUTER` to spend their USDC before the first trade.

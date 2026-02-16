@@ -20,6 +20,10 @@ export const POSITION_MANAGER_ABI = [
     "function executionFee() view returns (uint256)",
 ];
 
+export const SETTLE_MANAGER_ABI = [
+    "function settlePosition(address[] memory _path, uint16 _underlyingAssetIndex, bytes32 _optionId, uint256 _minOut, bool _withdrawETH) external payable"
+];
+
 export const ERC20_ABI = [
     "function decimals() view returns (uint8)",
     "function symbol() view returns (string)",

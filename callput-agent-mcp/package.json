@@ -18,7 +18,7 @@
     "author": "Callput Team",
     "license": "MIT",
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^0.6.0",
+        "@modelcontextprotocol/sdk": "^1.26.0",
         "dotenv": "^16.6.1",
         "ethers": "^6.16.0",
         "viem": "^2.0.0",
