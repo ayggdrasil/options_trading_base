@@ -4,7 +4,8 @@
   "workspaces": [
     "shared",
     "backend/*",
-    "frontend"
+    "frontend",
+    "callput-agent-mcp"
   ],
   "packageManager": "npm@10.3.0",
   "scripts": {
