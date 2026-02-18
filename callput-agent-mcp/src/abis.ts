@@ -19,6 +19,9 @@ export const POSITION_MANAGER_ABI = [
     "function createOpenPosition(uint16 _underlyingAssetIndex, uint8 _length, bool[4] memory _isBuys, bytes32[4] memory _optionIds, bool[4] memory _isCalls, uint256 _minSize, address[] memory _path, uint256 _amountIn, uint256 _minOutWhenSwap, address _leadTrader) external payable returns (bytes32)",
     "function createClosePosition(uint16 _underlyingAssetIndex, bytes32 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawETH) external payable returns (bytes32)",
     "function executionFee() view returns (uint256)",
+    "function openPositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, bytes32 optionTokenId, uint256 amountIn, uint256 sizeOut, uint256 executionFee, uint256 blockNumber, uint256 blockTime, bool isExecuted, bool isCancelled)",
+    "function closePositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, bytes32 optionTokenId, uint256 sizeDelta, uint256 amountOut, uint256 executionFee, uint256 blockNumber, uint256 blockTime, bool isExecuted, bool isCancelled)",
+    "event GenerateRequestKey(address indexed account, bytes32 key, bool isOpen)",
 ];
 
 export const SETTLE_MANAGER_ABI = [
@@ -29,4 +32,6 @@ export const ERC20_ABI = [
     "function decimals() view returns (uint8)",
     "function symbol() view returns (string)",
     "function balanceOf(address account) view returns (uint256)",
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)",
 ];

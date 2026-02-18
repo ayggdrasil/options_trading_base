@@ -62,60 +62,42 @@ This skill provides specialized capability to trade on-chain options on the Call
 
 ## Standard Operating Procedure (SOP)
 
+> **IMPORTANT**: Every trade requires 3 mandatory steps: **Approve → Execute → Verify**. Skipping any step causes failures.
+
 ### Phase 1: Analysis & Selection
+1.  `callput_get_available_assets()` → pick asset (BTC/ETH).
+2.  `callput_get_option_chains(underlying_asset)` → browse strikes & expiries.
+3.  `callput_get_greeks(option_id)` → pick legs with desired Delta.
 
-1.  **Identify Asset**: `callput_get_available_assets()` -> User selects e.g., "BTC".
-2.  **Fetch Chain**: `callput_get_option_chains(underlying_asset="BTC")`.
-3.  **Analyze Greeks**:
-    -   Iterate through interesting strikes.
-    -   Call `callput_get_greeks(option_id)` for candidates.
-    -   *Example*: "I want a Long Call Leg with Delta ~0.5".
+### Phase 2: Strategy & Validation
+1.  Pick strategy: `BuyCallSpread` (bullish), `BuyPutSpread` (bearish).
+2.  `callput_validate_spread(strategy, long_leg_id, short_leg_id)` → ensure `maxTradableQuantity > 0`.
 
-### Phase 2: Strategy Construction
-
-Select a Spread Strategy based on Greeks and View:
-
-| View | Strategy | Structure |
-| :--- | :--- | :--- |
-| **Bullish** | **Bull Call Spread** | Buy Low Strike Call + Sell High Strike Call |
-| **Bearish** | **Bear Put Spread** | Buy High Strike Put + Sell Low Strike Put |
-| **Neutral/Range** | *Credit Spreads* | (Advanced) Sell OTM Put Spread or Call Spread |
-
-### Phase 3: Pre-Trade Validation (MANDATORY)
-
-**Before requesting a quote**, you MUST run validation:
-
-```javascript
-// Example: Checking a Bull Call Spread
-const validation = await callput_validate_spread({
-  strategy: "BuyCallSpread",
-  long_leg_id: "0x123...", 
-  short_leg_id: "0x456..."
-});
-
-if (validation.maxTradableQuantity > 0) {
-  // Safe to proceed
-}
-```
+### Phase 3: USDC Approval (MANDATORY, first time only)
+1.  `callput_approve_usdc(amount)` → generates approval tx.
+2.  User signs the approval transaction.
+3.  Without this step, the trade transaction **will revert**.
 
 ### Phase 4: Execution
+1.  `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)` → generates trade tx.
+2.  User signs the trade transaction. **Save the tx hash.**
 
-1.  Call `callput_request_quote` with the IDs and Amount.
-2.  Output the transaction to the user for signing.
+### Phase 5: Post-Trade Verification (MANDATORY)
+1.  Wait ~15-30 seconds after tx is mined.
+2.  `callput_check_tx_status(tx_hash, is_open=true)` → check status.
+3.  If **"pending"**: wait 30s, try again.
+4.  If **"executed"**: confirmed ✓.
+5.  If **"cancelled"**: retry with fresh quote.
 
-### Phase 5: Monitoring & Risk Management
-1.  Periodically call `callput_get_my_positions(address)`.
-2.  Check PnL and Delta exposure.
-3.  Check `callput_get_market_trends()` for IV spikes. If IV is extremely high, consider selling (closing) long positions to harvest "IV Crush".
-
-### Phase 6: Exit (Close or Settle)
--   **Manual Exit**: Call `callput_close_position` if PnL target is reached or Stop-Loss is triggered.
--   **Expiry**: If held until expiry, call `callput_settle_position`.
+### Phase 6: Monitoring & Exit
+-   `callput_get_my_positions(address)` → view PnL.
+-   `callput_get_market_trends()` → check IV and spot prices.
+-   To exit: `callput_close_position(...)` → then `callput_check_tx_status(tx_hash, is_open=false)`.
+-   Post-expiry: `callput_settle_position(option_id, underlying_asset)`.
 
 ## Common Pitfalls
-
--   **Stop-Loss**: Agents should implement their own stop-loss logic using `get_my_positions` and `close_position`.
-
--   **Liquidity = 0**: The `Liquidity` field in option chains is the Vault's USDC balance. If it's low, large trades will fail. Always check `maxTradableQuantity` in validation.
--   **Deep ITM**: Deep In-The-Money options often have wide spreads or low liquidity. Prefer ATM (At-The-Money) or slightly OTM (Out-of-The-Money).
--   **Approvals**: The user must approve the `ROUTER` to spend their USDC before the first trade.
+-   **No Approval = Revert**: Always `callput_approve_usdc` before the first trade.
+-   **No Status Check = Blind**: Always `callput_check_tx_status` after submitting.
+-   **Liquidity = 0**: Check `maxTradableQuantity` in validation.
+-   **Deep ITM**: Wide spreads, prefer ATM or slightly OTM.
+-   **Stop-Loss**: Track PnL with `get_my_positions`, exit with `close_position`.

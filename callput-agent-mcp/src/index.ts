@@ -210,6 +210,33 @@ server.registerTool(
 );
 
 server.registerTool(
+    "callput_approve_usdc",
+    {
+        description: "Generate a transaction to approve USDC spending for the Router contract. This MUST be done before any trade.",
+        inputSchema: {
+            amount: z.string().describe("Amount of USDC to approve (in human-readable units, e.g. '100' for $100). Use '115792089237316195423570985008687907853269984665640564039457584007913129639935' for max approval.")
+        }
+    },
+    async (args) => {
+        return await handleApproveUsdc(args as { amount: string });
+    }
+);
+
+server.registerTool(
+    "callput_check_tx_status",
+    {
+        description: "Check the execution status of a trade transaction. Parses GenerateRequestKey event from the tx receipt, then polls openPositionRequests/closePositionRequests to check if Pending/Executed/Cancelled.",
+        inputSchema: {
+            tx_hash: z.string().describe("The transaction hash to check."),
+            is_open: z.boolean().optional().default(true).describe("True for open position trades, false for close position trades.")
+        }
+    },
+    async (args) => {
+        return await handleCheckTxStatus(args as { tx_hash: string; is_open: boolean });
+    }
+);
+
+server.registerTool(
     "callput_settle_position",
     {
         description: "Settle (close) an expired option position. Returns a transaction to sign.",
@@ -700,24 +727,27 @@ async function handleRequestQuote(params: {
     const { longStrike, shortStrike, longLegParsed, shortLegParsed, asset: foundAsset, spreadCost } = validation.details;
 
     const longLeg = longLegParsed;
-    const isCall = params.strategy === "BuyCallSpread";
 
-    // Construct Transaction Payload
-    const strikes = [longStrike, shortStrike, 0, 0];
-    const isBuys = [true, false, false, false];
-    const isCalls = [isCall, isCall, false, false];
+    // Determine direction and type from strategy
+    const isCall = params.strategy === "BuyCallSpread" || params.strategy === "SellCallSpread";
+    const isBuy = params.strategy === "BuyCallSpread" || params.strategy === "BuyPutSpread";
 
-    const optionIds = [
-        params.long_leg_id,
-        params.short_leg_id,
+    // Construct Transaction Payload (matching frontend getIsBuys/getIsCalls)
+    const isBuys: [boolean, boolean, boolean, boolean] = [isBuy, !isBuy, false, false];
+    const isCalls: [boolean, boolean, boolean, boolean] = [isCall, isCall, false, false];
+
+    // Option IDs must be bytes32-padded
+    const optionIds: [string, string, string, string] = [
+        ethers.zeroPadValue(ethers.toBeHex(BigInt(params.long_leg_id)), 32),
+        ethers.zeroPadValue(ethers.toBeHex(BigInt(params.short_leg_id)), 32),
         ethers.ZeroHash,
         ethers.ZeroHash
     ];
 
     const executionFee = await positionManager.executionFee();
-    const vaultAddress = getVaultAddress(longLeg.vaultIndex);
     const USDC = CONFIG.CONTRACTS.USDC;
-    const path = [USDC, vaultAddress];
+    // Path: single element [USDC] for USDC-denominated trades (matching frontend)
+    const path = [USDC];
 
     const decimals = await getDecimals(USDC);
     const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
@@ -870,6 +900,148 @@ async function handleSettlePosition(params: { option_id: string; underlying_asse
     } catch (error: any) {
         return {
             content: [{ type: "text" as const, text: `Error generating settlement transaction: ${error.message}` }],
+            isError: true,
+        };
+    }
+}
+
+async function handleApproveUsdc(params: { amount: string }): Promise<CallToolResult> {
+    try {
+        const { amount } = params;
+        const iface = new ethers.Interface(ERC20_ABI);
+
+        // If the amount looks like max uint256, use it raw. Otherwise parse as USDC (6 decimals).
+        let approvalAmount: bigint;
+        if (amount.length > 30) {
+            approvalAmount = BigInt(amount);
+        } else {
+            approvalAmount = ethers.parseUnits(amount, 6);
+        }
+
+        const data = iface.encodeFunctionData("approve", [
+            CONFIG.CONTRACTS.ROUTER,
+            approvalAmount
+        ]);
+
+        const output = {
+            status: "unsigned_transaction_generated",
+            to: CONFIG.CONTRACTS.USDC,
+            data: data,
+            value: "0",
+            chain_id: CONFIG.CHAIN_ID,
+            description: `Approve USDC spending for Router (${CONFIG.CONTRACTS.ROUTER})`,
+            instruction: "Sign this transaction BEFORE placing any trade. This allows the Router to pull USDC from your wallet."
+        };
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: JSON.stringify(output, null, 2)
+            }],
+            structuredContent: output
+        };
+    } catch (error: any) {
+        return {
+            content: [{ type: "text" as const, text: `Error generating approval transaction: ${error.message}` }],
+            isError: true,
+        };
+    }
+}
+
+async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }): Promise<CallToolResult> {
+    try {
+        const { tx_hash, is_open } = params;
+
+        // 1. Get Transaction Receipt
+        const receipt = await provider.getTransactionReceipt(tx_hash);
+        if (!receipt) {
+            return {
+                content: [{ type: "text" as const, text: JSON.stringify({ status: "not_found", message: "Transaction not found or not yet mined. Try again later." }) }]
+            };
+        }
+
+        if (receipt.status === 0) {
+            return {
+                content: [{ type: "text" as const, text: JSON.stringify({ status: "reverted", message: "Transaction reverted on-chain. Check if USDC was approved and parameters were correct." }) }],
+                isError: true
+            };
+        }
+
+        // 2. Parse GenerateRequestKey event from logs
+        const iface = new ethers.Interface(POSITION_MANAGER_ABI);
+        let requestKey: string | null = null;
+
+        for (const log of receipt.logs) {
+            try {
+                const parsed = iface.parseLog({ topics: log.topics as string[], data: log.data });
+                if (parsed && parsed.name === "GenerateRequestKey") {
+                    requestKey = parsed.args.key;
+                    break;
+                }
+            } catch {
+                // Not our event, skip
+            }
+        }
+
+        if (!requestKey) {
+            return {
+                content: [{ type: "text" as const, text: JSON.stringify({ status: "no_key", message: "Transaction succeeded but GenerateRequestKey event not found. This may not be a Callput position transaction." }) }],
+                isError: true
+            };
+        }
+
+        // 3. Poll position request status
+        let requestData: any;
+        if (is_open) {
+            requestData = await positionManager.openPositionRequests(requestKey);
+        } else {
+            requestData = await positionManager.closePositionRequests(requestKey);
+        }
+
+        const isExecuted = requestData.isExecuted;
+        const isCancelled = requestData.isCancelled;
+
+        let status: string;
+        if (isExecuted) {
+            status = "executed";
+        } else if (isCancelled) {
+            status = "cancelled";
+        } else {
+            status = "pending";
+        }
+
+        const output: any = {
+            status: status,
+            request_key: requestKey,
+            tx_hash: tx_hash,
+            account: requestData.account,
+            option_token_id: requestData.optionTokenId.toString(),
+        };
+
+        if (is_open && isExecuted) {
+            output.amount_in = requestData.amountIn.toString();
+            output.size_out = requestData.sizeOut.toString();
+            output.message = "Position opened successfully!";
+        } else if (!is_open && isExecuted) {
+            output.size_delta = requestData.sizeDelta.toString();
+            output.amount_out = requestData.amountOut.toString();
+            output.message = "Position closed successfully!";
+        } else if (isCancelled) {
+            output.message = "Order was cancelled. This can happen due to price movement or insufficient liquidity. Funds are returned.";
+        } else {
+            output.message = "Order is pending execution by the keeper. Check again in ~30 seconds.";
+        }
+
+        return {
+            content: [{
+                type: "text" as const,
+                text: JSON.stringify(output, null, 2)
+            }],
+            structuredContent: output
+        };
+    } catch (error: any) {
+        return {
+            content: [{ type: "text" as const, text: `Error checking tx status: ${error.message}` }],
             isError: true,
         };
     }
