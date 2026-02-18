@@ -136,15 +136,40 @@ Open http://localhost:6274 in your browser:
 
 ---
 
-## 📊 Available Tools
+## 📊 Available Tools & Workflow
 
-### Step 1: Strategy & Discovery
-1.  **Check Assets**: Call `callput_get_available_assets` to see Assets & Expiry Dates.
-2.  **Decide Strategy**: Choose Bull/Bear & Call/Put **before** fetching chains.
-3.  **Get Chain**: Call `callput_get_option_chains(asset, expiry, type)`.
+To execute a trade successfully, you **MUST** follow this 6-phase workflow. Skipping steps (especially Approval and Verification) will lead to failed trades.
+
+### Phase 1: Analysis & Discovery
+1.  **Check Assets**: `callput_get_available_assets` to see supported Assets (BTC/ETH).
+2.  **Market Trends**: `callput_get_market_trends` to check Spot Prices, IV, and Sentiment.
+3.  **Get Chain**: `callput_get_option_chains(underlying_asset)`.
     - Returns `[Strike, Price, Liquidity, MaxQty, OptionID]`.
-    - **Crucial**: Verify `MaxQty` (calculated as `Liquidity / Strike`) is sufficient for your trade size.
-4.  **Analyze**: Use `callput_get_greeks` for risk metrics.
+
+### Phase 2: Strategy & Validation
+1.  **Pick Strategy**: `BuyCallSpread` (Bullish) or `BuyPutSpread` (Bearish).
+2.  **Validate**: `callput_validate_spread(strategy, long_leg_id, short_leg_id)`.
+    - **MUST** return `status: "Valid"` and `maxTradableQuantity > 0`.
+
+### Phase 3: USDC Approval (MANDATORY)
+1.  **Generate Approval**: `callput_approve_usdc(amount)`.
+    - This generates a transaction to approve the **Router** to spend your USDC.
+2.  **Action**: Submit this transaction and wait for it to be mined.
+
+### Phase 4: Execution
+1.  **Generate Trade**: `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`.
+2.  **Action**: Submit the generated transaction. **Save the transaction hash.**
+
+### Phase 5: Post-Trade Verification (MANDATORY)
+1.  **Check Status**: `callput_check_tx_status(tx_hash, is_open=true)`.
+2.  **Wait**: Transaction execution on-chain happens via an asynchronous keeper.
+    - If status is `pending`, wait 15-30 seconds and check again.
+    - If status is `executed`, your position is open!
+
+### Phase 6: Monitoring & Exit
+1.  **Monitor**: `callput_get_my_positions(address)` to check real-time PnL.
+2.  **Exit Early**: `callput_close_position(...)` -> then verify with `callput_check_tx_status(tx_hash, is_open=false)`.
+
 
 ### 1. Get Available Assets (`callput_get_available_assets`)
 
@@ -249,6 +274,31 @@ Enforces **Spread Trading** (Callput.app style). Single leg trading is disabled 
 **Output:**
 Generates transaction calldata for `PositionManager.createOpenPosition`.
 
+
+---
+
+### `callput_approve_usdc`
+
+Generates a transaction to approve USDC spending for the Router contract. This MUST be done before your first trade.
+
+**Input:**
+```json
+{
+  "amount": "100" // Human-readable USDC amount
+}
+```
+
+### `callput_check_tx_status`
+
+Essential for tracking the asynchronous execution of trades. Parses the `GenerateRequestKey` event from the tx receipt and polls the contract to check if the trade was Executed, Cancelled, or is still Pending.
+
+**Input:**
+```json
+{
+  "tx_hash": "0x...",
+  "is_open": true
+}
+```
 
 ---
 

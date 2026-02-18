@@ -54,7 +54,7 @@ node build/test_s3_fetch.js
 > **중요**: `/path/to/` 부분을 실제 로컬 경로로 변경하세요!
 > 예: `/Users/username/options_trading_base/callput-agent-mcp/build/index.js`
 
-설정 업데이트 후 **Claude Desktop을 재시작**하세요.
+설정과 업데이트 후 **Claude Desktop을 재시작**하세요.
 
 ---
 
@@ -78,11 +78,11 @@ await client.connect(transport);
 
 // 옵션 조회
 const result = await client.callTool({
-  name: "get_option_chains",
-  arguments: { underlying_asset: "WETH" }
+  name: "callput_get_option_chains",
+  arguments: { underlying_asset: "ETH" }
 });
 
-console.log(result); // 214개의 옵션 발견!
+console.log(result);
 ```
 
 ---
@@ -106,12 +106,12 @@ request = {
     "id": 1,
     "method": "tools/call",
     "params": {
-        "name": "get_option_chains",
-        "arguments": {"underlying_asset": "WETH"}
+        "name": "callput_get_option_chains",
+        "arguments": {"underlying_asset": "ETH"}
     }
 }
 
-process.stdin.write(json.dumps(request).encode() + b'\\n')
+process.stdin.write(json.dumps(request).encode() + b'\n')
 process.stdin.flush()
 
 response = json.loads(process.stdout.readline())
@@ -130,133 +130,66 @@ npx @modelcontextprotocol/inspector node build/index.js
 ```
 
 브라우저에서 http://localhost:6274 접속:
-1. `get_option_chains` 툴 선택.
-2. 인자로 `{"underlying_asset": "WETH"}` 입력.
+1. `callput_get_option_chains` 툴 선택.
+2. 인자로 `{"underlying_asset": "ETH"}` 입력.
 3. **200개 이상의 옵션이 보이는지 확인!** ✅
 
 ---
 
-## 📊 사용 가능한 툴 (Tools)
+## 📊 사용 가능한 툴 및 워크플로우
 
-### 1. 거래 가능 자산 조회 (`get_available_assets`)
+성공적인 거래를 위해 반드시 아래의 **6단계 워크플로우**를 준수해야 합니다. 승인(Approval)이나 검증(Verification) 단계를 건너뛰면 거래가 실패합니다.
 
-현재 옵션 거래가 지원되는 기초 자산 목록을 조회합니다.
+### 1단계: 분석 및 탐색 (Analysis & Discovery)
+1.  **자산 확인**: `callput_get_available_assets`로 지원 자산(BTC/ETH) 확인.
+2.  **시장 동향**: `callput_get_market_trends`로 현재가, IV, 감성 분석 확인.
+3.  **옵션 조회**: `callput_get_option_chains(underlying_asset)`.
+    - 반환 형식: `[Strike, Price, Liquidity, MaxQty, OptionID]`.
 
-**요청 (Request):**
-```json
-{
-  "name": "get_available_assets",
-  "arguments": {}
-}
-```
+### 2단계: 전략 수립 및 검증 (Strategy & Validation)
+1.  **전략 선택**: `BuyCallSpread` (강세) 또는 `BuyPutSpread` (약세).
+2.  **검증**: `callput_validate_spread(strategy, long_leg_id, short_leg_id)`.
+    - **반드시** `status: "Valid"`이고 `maxTradableQuantity > 0`인지 확인하십시오.
 
-**응답 (Response):
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC)### 1단계: 전략 수립 및 탐색 (Strategy & Discovery)
-1.  **시장 확인**: `get_available_assets`로 자산과 만기일을 확인합니다.
-2.  **전략 선택**: 옵션을 조회하기 **전에** Bull/Bear 방향성과 전략(Call/Put)을 먼저 결정하십시오.
-3.  **옵션 조회**: `get_option_chains(asset, expiry, type)`를 호출합니다.
-    - 응답 형식: `[Strike, Price, Liquidity, MaxQty, OptionID]`
-    - **중요**: `MaxQty` (유동성 / 행사가)를 확인하여, 거래하려는 수량이 이보다 작은지 반드시 확인하십시오."arguments": {
-    "underlying_asset": "BTC"
-  }
-}
-```
+### 3단계: USDC 승인 (Approval - 필수)
+1.  **승인 생성**: `callput_approve_usdc(amount)`.
+    - **Router** 컨트랙트가 사용자의 USDC를 사용할 수 있도록 허용하는 트랜잭션을 생성합니다.
+2.  **실행**: 생성된 트랜잭션을 전송하고 채굴될 때까지 기다립니다.
 
-### 2. 옵션 체인 조회 (`get_option_chains`)
+### 4단계: 거래 실행 (Execution)
+1.  **거래 생성**: `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`.
+2.  **실행**: 생성된 트랜잭션을 전송합니다. **트랜잭션 해시를 반드시 저장하십시오.**
 
-**입력:**
-```json
-{
-  "name": "get_option_chains",
-  "arguments": {
-    "underlying_asset": "BTC"
-  }
-}
-```
+### 5단계: 거래 결과 검증 (Verification - 필수)
+1.  **상태 확인**: `callput_check_tx_status(tx_hash, is_open=true)`.
+2.  **대기**: 온체인 실행은 비동기 키퍼(Keeper)에 의해 처리됩니다.
+    - 상태가 `pending`이면 15-30초 후 다시 확인하십시오.
+    - 상태가 `executed`이면 포지션 오픈 성공!
 
-**응답:**
-만기일별 옵션 리스트와 `underlying_price`(현재가)를 반환합니다.
+### 6단계: 모니터링 및 종료 (Monitoring & Exit)
+1.  **모니터링**: `callput_get_my_positions(address)`로 실시간 PnL 확인.
+2.  **조기 종료**: `callput_close_position(...)` -> `callput_check_tx_status(tx_hash, is_open=false)`로 검증.
+3.  **만기 정산**: 만기 시까지 보유했다면 `callput_settle_position` 사용.
 
-### 3. 스프레드 유효성 검증 (`validate_spread`)
+---
 
-실제 트랜잭션을 생성하기 전, 해당 스프레드 전략이 유효한지(가격 제약, 행사가 순서 등) 확인합니다.
+## 🛠 툴 레퍼런스 (Tool Reference)
 
-**요청 (Request):**
-```json
-{
-  "name": "validate_spread",
-  "arguments": {
-    "strategy": "BuyCallSpread",
-    "long_leg_id": "0x123...",
-    "short_leg_id": "0x456..."
-  }
-}
-```
+### `callput_approve_usdc`
+Router 컨트랙트가 사용자의 USDC를 사용할 수 있도록 승인 트랜잭션을 생성합니다.
+- **입력**: `amount` (예: $100 승인 시 "100")
 
-**응답 (Response):**
-*   **성공 시**: `status: "Valid"` 및 스프레드 예상 비용 포함.
-*   **실패 시**: `isError: true` 및 실패 사유 반환.
+### `callput_request_quote`
+실제 옵션 거래 트랜잭션 데이터를 생성합니다.
+- **입력**: `strategy`, `long_leg_id`, `short_leg_id`, `amount`, `slippage`
+- **중요**: 생성된 calldata에는 `isBuys`, `isCalls`, `optionIds` 등 온체인 실행에 필요한 모든 데이터가 정확히 포함되어 있습니다.
 
-### 4. 견적 요청 / 거래 생성 (`request_quote`):**
-**참고:** 토큰 절약을 위해 옵션 리스트는 **Compact Array** `[행사가, 가격, 유동성, 옵션ID]` 형태로 제공됩니다.
+### `callput_check_tx_status`
+`GenerateRequestKey` 이벤트를 파싱하고 컨트랙트를 조회하여 거래가 **성공(Executed)**, **취소(Cancelled)**, 또는 **대기(Pending)** 중인지 확인합니다.
+- **입력**: `tx_hash`, `is_open` (오픈 시 true, 종료 시 false)
 
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{
-        \"asset\": \"ETH\",
-        \"underlying_price\": 2500.50,
-        \"format\": \"[Strike, Price, Liquidity, OptionID]\",
-        \"expiries\": {
-          \"14FEB26\": {
-            \"days\": 2,
-            \"call\": [
-              [2400, 150.2, 12000, \"38482...\"],
-              [2500, 80.5, 5000, \"38491...\"]
-            ],
-            \"put\": [
-              [2300, 40.1, 8000, \"38501...\"]
-            ]
-          }
-        },
-        \"last_updated\": 1707890000
-      }"
-    }
-  ]
-}
-```
-
-**거래 전략 및 규칙 (Strategy & Rules):**
-1.  **스프레드 필수**: 반드시 Spread 거래를 해야 합니다.
-2.  **현재가(Spot Price) 활용**: 응답에 포함된 `underlying_price`를 참고하세요.
-    *   **ATM(등가격) 또는 OTM(외가격) 위주로 선택하세요.**
-    *   Deep ITM(내가격이 깊은 옵션)은 유동성이 부족하여 거래 실패 확률이 높습니다. (예: 현재가보다 훨씬 낮은 행사가의 콜 옵션 ❌)
-3.  **최소 가격**: Spread Price ≥ **$60 (BTC)** / **$3 (ETH)**.
-
-### `request_quote`
-
-**스프레드 거래**를 강제합니다 (Callput.app 스타일). 안전을 위해 단일 레그(Naked) 거래는 비활성화되어 있습니다.
-
-**입력:**
-```json
-{
-  "strategy": "BuyCallSpread",  // 또는 "BuyPutSpread"
-  "long_leg_id": "123...",      // 롱 포지션 토큰 ID
-  "short_leg_id": "124...",     // 숏 포지션 토큰 ID
-  "amount": 1,
-  "slippage": 0.5
-}
-```
-
-**출력:**
-`PositionManager.createOpenPosition` 호출을 위한 트랜잭션 데이터를 생성합니다.
+### `callput_get_my_positions`
+활성 포지션 목록과 실시간 mark price 기반 PnL을 가져옵니다.
 
 ---
 
@@ -265,18 +198,8 @@ npx @modelcontextprotocol/inspector node build/index.js
 **"옵션이 0개로 보입니다"**
 → `node build/test_s3_fetch.js`를 실행하여 S3 연결을 확인하세요.
 
-**"Error: Cannot find module"**
-→ 올바른 디렉토리에서 `npm install` 및 `npm run build`를 실행했는지 확인하세요.
-
-**"Connection failed"**
-→ 인터넷 연결 및 RPC 엔드포인트(기본값: https://mainnet.base.org)를 확인하세요.
-
 **"ERC20: transfer amount exceeds allowance"**
-→ **중요:** 거래를 위해서는 **USDC** 승인이 필수입니다.
-→ WBTC 옵션을 거래하더라도 결제는 **USDC**로 이루어집니다.
-→ **조치:** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (USDC) 컨트랙트에서 아래 주소(Router)에 대해 승인(Approve)을 실행하세요.
-→ **Spender 주소:** `0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2`
-→ `request_quote` 툴의 응답에도 이 주소들이 포함되어 있어 쉽게 확인할 수 있습니다.
+→ **중요:** 거래를 위해서는 **USDC 승인**이 필수입니다. `callput_approve_usdc` 툴을 사용하십시오.
 
 ---
 
@@ -284,7 +207,13 @@ npx @modelcontextprotocol/inspector node build/index.js
 
 - [README.md](./README.md) - 메인 문서
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - 시스템 설계
-- [MCP_SETUP.md](./MCP_SETUP.md) - 상세 설정 가이드
+
+---
+
+## 💬 고객 지원
+
+- GitHub Issues: https://github.com/ayggdrasil/options_trading_base/issues
+- 공식 웹사이트: https://callput.app
 
 ---
 
