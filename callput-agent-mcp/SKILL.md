@@ -1,103 +1,89 @@
 ---
 name: callput-option-trader
-description: Comprehensive toolset for analyzing and trading on-chain options via the Callput protocol on Base L2. Use this skill when the user wants to trade options, analyze option market data (IV, Greeks), execute spread strategies (Bull Call, Bear Put, etc.), or manage existing positions (settle/close).
+description: Compact Callput trading skill for Base L2. Enforce spread-only execution with strict validation, liquidity checks, and close/settle lifecycle rules.
 license: MIT
 ---
 
-# Callput Option Trader
+# Callput Option Trader (Compact)
 
-This skill provides specialized capability to trade on-chain options on the Callput protocol.
+Use this skill when the user asks for:
+- BTC/ETH options market read
+- spread entry (bullish/bearish)
+- open position management (close/settle)
 
-## Workflow overview
+## One-line Intent
+`시장 분석 -> 방향 결정 -> 스프레드 후보 검증 -> 실행/포지션 정리`
 
-1.  **Market Analysis**: Identify opportunities using `callput_get_available_assets`.
-2.  **Option Search**: Fetch option chains for a selected asset using `callput_get_option_chains`.
-3.  **Strategy Selection & Filtering**:
-    -   Select a strategy (e.g., Bull Call Spread).
-    -   **Critical**: Filter candidates by Greeks (Delta, Gamma) using `callput_get_greeks` *before* decision.
-4.  **Execution** (Open/Close/Settle):
-    -   **Validation**: Use `callput_validate_spread` to check liquidity and validity.
-    -   **Trade**: Use `callput_request_quote` to generate the transaction.
-    -   **Settle**: Use `callput_settle_position` for expired positions.
+## Non-Negotiable Rules
 
-## Core Principles
+1. `callput_get_option_chains` output is for leg discovery, not direct single-leg execution.
+2. Never attempt vanilla single-leg trading via MCP.
+3. Always call `callput_validate_spread` before `callput_request_quote`.
+4. Trade only if:
+   - `status == "Valid"`
+   - `details.maxTradableQuantity > 0`
+5. After broadcast, always call `callput_check_tx_status`.
+6. If `cancelled`, refresh legs and repeat validation.
+7. For existing positions:
+   - pre-expiry: `callput_close_position`
+   - expired: `callput_settle_position`
+8. Never expose private keys in MCP output.
 
--   **Spreads Only**: The protocol (and this agent) specializes in Spreads (Vertical Spreads) for capital efficiency. Single leg trading is generally discouraged or not supported by these tools.
--   **Validation First**: Always dry-run a trade with `validate_spread` to check for Vault liquidity (`maxTradableQuantity`).
--   **Greek-Driven**: Do not just pick random strikes. Use Delta and Theta to align with the market view.
+## Context Overflow Guardrails
 
-## Tools
+1. Do not keep raw chain responses in long conversation memory.
+2. Immediately compress tool output into a compact state object and discard raw payload.
+3. Keep candidate set small:
+   - max 5 candidate spreads per cycle
+   - max 6 Greeks lookups per cycle
+4. Always filter chain queries as tightly as possible:
+   - set `underlying_asset`
+   - set `option_type` when known
+   - set `expiry_date` once target tenor is chosen
+5. Persist only minimal fields across turns:
+   - `asset`, `bias`, `target_expiry`
+   - `candidate_ids` (short list)
+   - `selected_long_leg_id`, `selected_short_leg_id`
+   - `validation_status`, `maxTradableQuantity`
+   - `last_tx_hash`, `last_tx_status`
+6. During status polling, only store latest status snapshot, not full history.
+7. If context window grows, drop historical reasoning and re-bootstrap from the compact state object.
 
-### 1. Market Discovery
--   `callput_get_available_assets`: Returns list of supported assets (e.g., BTC, ETH) and their expiry dates.
-    -   *Use when*: Starting a session to see what is tradable.
+## 4-Step Flow
 
-### 2. Option Chain & Analysis
--   `callput_get_option_chains(underlying_asset, expiry_date, option_type)`: Returns the option board.
-    -   **Output**: `[Strike, Price, Liquidity, MaxQty, OptionID]`
-    -   *Use when*: You need to see prices and available strikes.
--   `callput_get_greeks(option_id)`: **Crucial for professional trading**.
-    -   **Returns**: Delta, Gamma, Vega, Theta, IV.
-    -   *Use when*: Filtering strikes. Example: "Find me a Call with Delta 0.3".
+### 1) Market Analysis
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
 
-### 3. Validation & Execution
--   `callput_validate_spread(strategy, long_leg_id, short_leg_id)`:
-    -   *Purpose*: Checks if the spread is valid and if the Vault has enough liquidity.
-    -   **Output**: `maxTradableQuantity`. If this is 0, **DO NOT PROCEED**.
--   `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`:
-    -   *Purpose*: Generates the unsigned transaction to Open or Close a position.
-    -   *Note*: Requires user approval to sign.
+### 2) Direction Setup
+- Bullish: usually start from `BuyCallSpread`
+- Bearish: usually start from `BuyPutSpread`
+- Advanced agents may use sell spreads, but validation rules still apply.
 
-### 4. Settlement (Expired)
-- `callput_settle_position(option_id, underlying_asset)`:
-    - *Purpose*: Settle (claim profit/collateral) for an **expired** position.
+### 3) Tradable Spread Discovery
+- Optional filtering: `callput_get_greeks(option_id)`
+- Required feasibility: `callput_validate_spread(strategy, long_leg_id, short_leg_id)`
 
-### 5. Monitoring & Exit (Active)
-- `callput_get_my_positions(address)`:
-    - *Purpose*: View open positions, holding sizes, and real-time PnL.
-- `callput_close_position(address, option_id, size, underlying_asset)`:
-    - *Purpose*: Exit a position **before expiry** (Take Profit / Stop Loss).
-- `callput_get_market_trends()`:
-    - *Purpose*: Get a high-level summary of BTC/ETH IV and spot prices to decide on exits.
+### 4) Execute or Adjust
+- Open flow:
+  - `callput_approve_usdc(amount)` (if needed)
+  - `callput_request_quote(...)`
+  - user signs and broadcasts
+  - `callput_check_tx_status(tx_hash, is_open=true)` until terminal status
+- Position adjustment:
+  - `callput_get_my_positions(address)`
+  - pre-expiry close: `callput_close_position(...)` then `callput_check_tx_status(..., is_open=false)`
+  - expired settle: `callput_settle_position(option_id, underlying_asset)`
 
-## Standard Operating Procedure (SOP)
+## Failure Handling Template
 
-> **IMPORTANT**: Every trade requires 3 mandatory steps: **Approve → Execute → Verify**. Skipping any step causes failures.
+- Validation fails: pick new legs and retry validation.
+- Tx status `pending`: poll again in 15-30 seconds.
+- Tx status `cancelled`: refresh market data, re-select legs, re-validate, re-quote.
+- Tx status `reverted`: check approval, params, and chain conditions.
 
-### Phase 1: Analysis & Selection
-1.  `callput_get_available_assets()` → pick asset (BTC/ETH).
-2.  `callput_get_option_chains(underlying_asset)` → browse strikes & expiries.
-3.  `callput_get_greeks(option_id)` → pick legs with desired Delta.
-
-### Phase 2: Strategy & Validation
-1.  Pick strategy: `BuyCallSpread` (bullish), `BuyPutSpread` (bearish).
-2.  `callput_validate_spread(strategy, long_leg_id, short_leg_id)` → ensure `maxTradableQuantity > 0`.
-
-### Phase 3: USDC Approval (MANDATORY, first time only)
-1.  `callput_approve_usdc(amount)` → generates approval tx.
-2.  User signs the approval transaction.
-3.  Without this step, the trade transaction **will revert**.
-
-### Phase 4: Execution
-1.  `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)` → generates trade tx.
-2.  User signs the trade transaction. **Save the tx hash.**
-
-### Phase 5: Post-Trade Verification (MANDATORY)
-1.  Wait ~15-30 seconds after tx is mined.
-2.  `callput_check_tx_status(tx_hash, is_open=true)` → check status.
-3.  If **"pending"**: wait 30s, try again.
-4.  If **"executed"**: confirmed ✓.
-5.  If **"cancelled"**: retry with fresh quote.
-
-### Phase 6: Monitoring & Exit
--   `callput_get_my_positions(address)` → view PnL.
--   `callput_get_market_trends()` → check IV and spot prices.
--   To exit: `callput_close_position(...)` → then `callput_check_tx_status(tx_hash, is_open=false)`.
--   Post-expiry: `callput_settle_position(option_id, underlying_asset)`.
-
-## Common Pitfalls
--   **No Approval = Revert**: Always `callput_approve_usdc` before the first trade.
--   **No Status Check = Blind**: Always `callput_check_tx_status` after submitting.
--   **Liquidity = 0**: Check `maxTradableQuantity` in validation.
--   **Deep ITM**: Wide spreads, prefer ATM or slightly OTM.
--   **Stop-Loss**: Track PnL with `get_my_positions`, exit with `close_position`.
+## Short Commands for External Agents
+- `ETH 약세 시나리오로 거래 가능한 Put Spread 1개만 검증해서 실행까지 진행해.`
+- `포지션 점검 후 만기 전은 close, 만기 후는 settle로 정리해.`
+- `시장 분석 + 검증 통과한 스프레드 후보만 보고하고 실행은 하지 마.`

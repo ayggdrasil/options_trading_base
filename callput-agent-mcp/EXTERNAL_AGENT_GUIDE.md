@@ -1,48 +1,36 @@
-# 🚀 External Agent Installation Guide
+# External Agent Integration Guide (Callput MCP)
 
-This guide explains how to connect the Callput MCP server to external agents such as OpenClaw, custom bots, or other AI frameworks.
+This guide is for OpenClaw and other external agents integrating with `callput-agent-mcp`.
 
----
+## Goal
 
-## 📦 Step 1: Clone and Install
+Prevent common execution failures:
+- trying to trade vanilla single legs directly
+- skipping spread validation
+- using stale legs with no executable liquidity
+
+## Fast Setup
 
 ```bash
 git clone https://github.com/ayggdrasil/options_trading_base.git
 cd options_trading_base/callput-agent-mcp
 npm install
 npm run build
-```
-
-**Verify Connection:**
-```bash
 node build/test_s3_fetch.js
 ```
 
-**Expected Output:**
-```
-✅ S3 fetch successful!
-   Total active options available: 214
-```
+Expected result: active options count is returned.
 
----
+## Client Connection
 
-## 🔌 Step 2: Connect Your Agent
+### Claude Desktop
 
-### Method A: Claude Desktop (Recommended for Personal Use)
-
-**Config File Location:**
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%/Claude/claude_desktop_config.json`
-
-**Configuration Content:**
 ```json
 {
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": [
-        "/path/to/options_trading_base/callput-agent-mcp/build/index.js"
-      ],
+      "args": ["/path/to/options_trading_base/callput-agent-mcp/build/index.js"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -51,289 +39,234 @@ node build/test_s3_fetch.js
 }
 ```
 
-> **IMPORTANT**: Replace `/path/to/` with your actual local path to the cloned repository!
-> Example: `/Users/username/options_trading_base/callput-agent-mcp/build/index.js`
+### Node SDK
 
-**Restart Claude Desktop** after updating the config.
-
----
-
-### Method B: Direct Node.js Integration
-
-```typescript
+```ts
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["./options_trading_base/callput-agent-mcp/build/index.js"]
+  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
+  env: { RPC_URL: "https://mainnet.base.org" }
 });
 
-const client = new Client({
-  name: "my-agent",
-  version: "1.0.0"
-}, { capabilities: {} });
-
+const client = new Client({ name: "external-agent", version: "1.0.0" }, { capabilities: {} });
 await client.connect(transport);
-
-// Query options
-const result = await client.callTool({
-  name: "callput_get_option_chains",
-  arguments: { underlying_asset: "WETH" }
-});
-
-console.log(result); // 214 options found!
 ```
 
 ---
 
-### Method C: Python Integration
+## Canonical Tools
 
-```python
-import subprocess
-import json
+### Discovery
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_get_greeks`
 
-# Start MCP server
-process = subprocess.Popen(
-    ["node", "./options_trading_base/callput-agent-mcp/build/index.js"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE
-)
+### Execution
+- `callput_validate_spread`
+- `callput_approve_usdc`
+- `callput_request_quote`
+- `callput_check_tx_status`
 
-# Call tool
-request = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-        "name": "callput_get_option_chains",
-        "arguments": {"underlying_asset": "WETH"}
-    }
-}
+### Position Management
+- `callput_get_my_positions`
+- `callput_close_position`
+- `callput_settle_position`
 
-process.stdin.write(json.dumps(request).encode() + b'\\n')
-process.stdin.flush()
-
-response = json.loads(process.stdout.readline())
-print(f"Found options: {response}")  # 214 options!
-```
+Legacy aliases exist, but new agents should use canonical names only.
 
 ---
 
-## 🧪 Step 3: Testing with MCP Inspector
+## Mandatory Execution Contract
 
-Highly recommended for debugging during development.
+Your orchestrator must enforce all rules below.
 
-```bash
-cd options_trading_base/callput-agent-mcp
-npx @modelcontextprotocol/inspector node build/index.js
-```
-
-Open http://localhost:6274 in your browser:
-1. Select the `callput_get_option_chains` tool.
-2. Enter `{"underlying_asset": "WETH"}` as arguments.
-3. **Verify you see 200+ options!** ✅
+1. `callput_get_option_chains` returns vanilla legs for discovery only.
+2. Never try direct single-leg execution via MCP.
+3. Always run `callput_validate_spread` before `callput_request_quote`.
+4. Proceed only when:
+   - `status = "Valid"`
+   - `details.maxTradableQuantity > 0`
+5. Always call `callput_check_tx_status` after broadcast.
+6. If status is `cancelled`, do not replay same quote blindly.
+7. For exits:
+   - pre-expiry: `callput_close_position`
+   - post-expiry: `callput_settle_position`
 
 ---
 
-## 📊 Available Tools & Workflow
+## Context Budget Contract (Required)
 
-To execute a trade successfully, you **MUST** follow this 6-phase workflow. Skipping steps (especially Approval and Verification) will lead to failed trades.
+To reduce context overflow risk in long-running agent sessions:
 
-### Phase 1: Analysis & Discovery
-1.  **Check Assets**: `callput_get_available_assets` to see supported Assets (BTC/ETH).
-2.  **Market Trends**: `callput_get_market_trends` to check Spot Prices, IV, and Sentiment.
-3.  **Get Chain**: `callput_get_option_chains(underlying_asset)`.
-    - Returns `[Strike, Price, Liquidity, MaxQty, OptionID]`.
+1. Keep raw MCP payloads ephemeral.
+   - Parse and summarize immediately.
+   - Do not keep full `expiries` maps in persistent memory.
+2. Maintain a compact execution state only:
+   - `asset`, `bias`, `target_expiry`
+   - `candidate_spreads` (max 5)
+   - `selected_long_leg_id`, `selected_short_leg_id`
+   - `validation_status`, `maxTradableQuantity`
+   - `tx_hash`, `tx_status`
+3. Bound per-cycle calls:
+   - max 1 chain fetch
+   - max 6 Greeks calls
+   - max 5 validations
+   - max 1 quote call
+4. Narrow tool inputs early:
+   - use `option_type` and `expiry_date` whenever available
+   - avoid broad chain fetch loops across all expiries repeatedly
+5. Polling mode:
+   - keep only latest `callput_check_tx_status` snapshot
+   - discard old polling responses
+6. Logging policy:
+   - never append full calldata repeatedly
+   - log compact hash/IDs and terminal outcomes only
+7. Recovery policy:
+   - when context grows too large, rebuild from compact state and re-query fresh market data
 
-### Phase 2: Strategy & Validation
-1.  **Pick Strategy**: `BuyCallSpread` (Bullish) or `BuyPutSpread` (Bearish).
-2.  **Validate**: `callput_validate_spread(strategy, long_leg_id, short_leg_id)`.
-    - **MUST** return `status: "Valid"` and `maxTradableQuantity > 0`.
+---
 
-### Phase 3: USDC Approval (MANDATORY)
-1.  **Generate Approval**: `callput_approve_usdc(amount)`.
-    - This generates a transaction to approve the **Router** to spend your USDC.
-2.  **Action**: Submit this transaction and wait for it to be mined.
+## Recommended Flow (Production)
 
-### Phase 4: Execution
-1.  **Generate Trade**: `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`.
-2.  **Action**: Submit the generated transaction. **Save the transaction hash.**
+### Phase 1: Discovery
 
-### Phase 5: Post-Trade Verification (MANDATORY)
-1.  **Check Status**: `callput_check_tx_status(tx_hash, is_open=true)`.
-2.  **Wait**: Transaction execution on-chain happens via an asynchronous keeper.
-    - If status is `pending`, wait 15-30 seconds and check again.
-    - If status is `executed`, your position is open!
+1. `callput_get_available_assets`
+2. `callput_get_market_trends`
+3. `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
 
-### Phase 6: Monitoring & Exit
-1.  **Monitor**: `callput_get_my_positions(address)` to check real-time PnL.
-2.  **Exit Early**: `callput_close_position(...)` -> then verify with `callput_check_tx_status(tx_hash, is_open=false)`.
+Notes:
+- chain output format is `[Strike, Price, Liquidity, MaxQty, OptionID]`
+- output is trimmed around spot strikes
 
+### Phase 2: Candidate Selection
 
-### 1. Get Available Assets (`callput_get_available_assets`)
+- Build spread candidates (long + short) from chain output.
+- Prefer strikes near active liquidity zones.
 
-List the underlying assets currently supported for option trading.
+### Phase 3: Validation (Required)
 
-**Request:**
+Call:
 ```json
 {
-  "name": "callput_get_available_assets",
-  "arguments": {}
-}
-```
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\"assets\":[\"BTC\",\"ETH\"],\"description\":\"Currently supports Bitcoin (BTC) and Ethereum (ETH) options on Base L2.\"}"
-    }
-  ]
-}
-```
-
-### 2. Get Option Chains (`callput_get_option_chains`)
-
-Retrieve available **Vanilla Option** chains for a given underlying asset.
-
-> **⚠️ IMPORTANT TRADING RULE**:
-> The options returned by this tool are **Vanilla Options** (Single Legs).
-> However, **you cannot trade them individually**.
-> You **MUST** combine two vanilla options (one Long, one Short) to execute a **Spread Trade** via `callput_request_quote`.
-
-**Request:**
-```json
-{
-  "name": "callput_get_option_chains",
+  "name": "callput_validate_spread",
   "arguments": {
-    "underlying_asset": "BTC"
+    "strategy": "BuyCallSpread",
+    "long_leg_id": "...",
+    "short_leg_id": "..."
   }
 }
 ```
 
-**Response:**
-Returns a list of expiries and options. Note the `underlying_price` (Spot Price) to select appropriate ATM/OTM strikes.
-**Note:** The option list is a **Compact Array** `[Strike, Price, Liquidity, OptionID]` to save tokens.
+Required pass conditions:
+- `status` is `Valid`
+- `details.maxTradableQuantity > 0`
 
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{
-        \"asset\": \"ETH\",
-        \"underlying_price\": 2500.50,
-        \"format\": \"[Strike, Price, Liquidity, OptionID]\",
-        \"expiries\": {
-          \"14FEB26\": {
-            \"days\": 2,
-            \"call\": [
-              [2400, 150.2, 12000, \"38482...\"],
-              [2500, 80.5, 5000, \"38491...\"]
-            ],
-            \"put\": [
-              [2300, 40.1, 8000, \"38501...\"]
-            ]
-          }
-        },
-        \"last_updated\": 1707890000
-      }"
-    }
-  ]
-}
+Validation checks include:
+- same underlying and expiry
+- strategy strike-direction consistency
+- minimum spread price floor
+  - BTC >= 60
+  - ETH >= 3
+
+### Phase 4: Approval
+
+- If allowance is insufficient, run `callput_approve_usdc(amount)`.
+- Sign and broadcast approval tx.
+
+### Phase 5: Quote and Broadcast
+
+- Run `callput_request_quote(...)`
+- Sign and broadcast returned unsigned tx
+- Save `tx_hash`
+
+### Phase 6: Keeper Status Loop
+
+- Run `callput_check_tx_status(tx_hash, is_open=true)`
+- Poll every 15-30 seconds until terminal state
+
+Terminal states:
+- `executed`: open success
+- `cancelled`: refresh legs and restart at Phase 1 or 2
+- `reverted`: inspect approval/params and recover
+
+### Phase 7: Position Lifecycle
+
+- `callput_get_my_positions(address)` for monitoring
+- pre-expiry close: `callput_close_position` + `callput_check_tx_status(..., false)`
+- expired settle: `callput_settle_position`
+
+---
+
+## Common Failure Patterns and Fixes
+
+### Symptom: "Option is not available"
+Cause:
+- stale legs or no executable liquidity at keeper execution time
+
+Fix:
+- refresh chain data
+- choose new legs
+- re-run validation
+- request new quote
+
+### Symptom: `cancelled`
+Cause:
+- liquidity shift or price movement between request and keeper execution
+
+Fix:
+- do not replay previous calldata
+- restart candidate discovery and validation
+
+### Symptom: direct vanilla attempts
+Cause:
+- orchestrator misread chain output as tradable instrument
+
+Fix:
+- hardcode spread-only execution contract in tool policy layer
+
+### Symptom: allowance error
+Cause:
+- approval not done or wrong spender
+
+Fix:
+- run `callput_approve_usdc`
+- verify spender and token from quote response
+
+---
+
+## OpenClaw System Prompt Block
+
+Use `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/OPENCLAW_SYSTEM_PROMPT.md` as the base policy block in your OpenClaw system prompt.
+
+At minimum, include:
+- spread-only execution
+- validate-before-quote
+- post-broadcast status polling
+- close vs settle expiry split
+- context budget contract
+
+---
+
+## Inspector Debugging
+
+```bash
+npx @modelcontextprotocol/inspector node build/index.js
 ```
 
-**Trading Rules & Strategy:**
-1.  **Spread Only**: You MUST trade Spreads (Call Spread or Put Spread).
-2.  **Use Spot Price**: The response includes `underlying_price`. **Always select Strikes close to the Spot Price (ATM) or Out-of-the-Money (OTM).**
-    *   Avoid Deep In-The-Money (ITM) options (Strikes far below Spot for Calls, far above Spot for Puts) as they have low liquidity.
-3.  **Price Floor**: Net Spread Price must be ≥ **$60 (BTC)** or **$3 (ETH)**.
-
-### `callput_request_quote`
-
-Enforces **Spread Trading** (Callput.app style). Single leg trading is disabled to ensure safety.
-
-**Input:**
-```json
-{
-  "strategy": "BuyCallSpread",  // or "BuyPutSpread"
-  "long_leg_id": "123...",      // Token ID for the Long Leg
-  "short_leg_id": "124...",     // Token ID for the Short Leg
-  "amount": 1,
-  "slippage": 0.5
-}
-```
-
-**Strategy Rules:**
-- **BuyCallSpread (Bull Call):** `Long Strike < Short Strike` (Both Calls)
-- **BuyPutSpread (Bear Put):** `Long Strike > Short Strike` (Both Puts)
-
-**Output:**
-Generates transaction calldata for `PositionManager.createOpenPosition`.
-
+Suggested test order:
+1. `callput_get_option_chains`
+2. `callput_validate_spread`
+3. `callput_request_quote`
+4. `callput_check_tx_status`
 
 ---
 
-### `callput_approve_usdc`
+## Security
 
-Generates a transaction to approve USDC spending for the Router contract. This MUST be done before your first trade.
-
-**Input:**
-```json
-{
-  "amount": "100" // Human-readable USDC amount
-}
-```
-
-### `callput_check_tx_status`
-
-Essential for tracking the asynchronous execution of trades. Parses the `GenerateRequestKey` event from the tx receipt and polls the contract to check if the trade was Executed, Cancelled, or is still Pending.
-
-**Input:**
-```json
-{
-  "tx_hash": "0x...",
-  "is_open": true
-}
-```
-
----
-
-## ❓ Troubleshooting
-
-**"I see 0 options"**
-→ Run `node build/test_s3_fetch.js` to verify S3 connectivity.
-
-**"Error: Cannot find module"**
-→ Ensure you ran `npm install` and `npm run build` in the correct directory.
-
-**"Connection failed"**
-→ Verify your internet connection and RPC endpoint (default: https://mainnet.base.org).
-
-**"ERC20: transfer amount exceeds allowance"**
-→ **Critical:** You must approve **USDC** for the **PositionManager** contract.
-→ Even if you are trading WBTC options, the MCP `request_quote` tool constructs transactions that pay with **USDC** (`path=[USDC]`).
-→ **Action:** Approve `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (USDC) for spender `0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2` (Router).
-→ The `request_quote` tool now returns these addresses in its response for easy verification.
-
----
-
-## 📚 Additional Resources
-
-- [README.md](./README.md) - Main documentation
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design
-- [MCP_SETUP.md](./MCP_SETUP.md) - Detailed setup guide
-
----
-
-## 💬 Support
-
-- GitHub Issues: https://github.com/ayggdrasil/options_trading_base/issues
-- Official Website: https://callput.app
-
----
-
-**Start trading with 200+ active options!** 🚀
+- Never send private keys through MCP inputs.
+- Keep signing and key custody in agent runtime.
+- Treat MCP responses as unsigned transaction instructions only.

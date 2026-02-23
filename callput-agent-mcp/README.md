@@ -1,156 +1,80 @@
 # Callput Agent MCP Server
 
-MCP (Model Context Protocol) server for the Callput.app Agentic Economy.
+Model Context Protocol (MCP) server for Callput options on Base L2.
 
-Allows AI agents to:
-- Query available option chains on Base L2
-- Get detailed pricing (mark IV, mark price, greeks)
-- Request transaction payloads for opening positions
+This server is for **spread trading execution support**. It provides market discovery, spread validation, quote generation, and position lifecycle tools.
+
+## Critical Rules (Read First)
+
+1. `callput_get_option_chains` returns **vanilla legs for discovery only**.
+2. You **must not** trade single-leg vanilla options directly through this MCP.
+3. You must run `callput_validate_spread` before `callput_request_quote`.
+4. Only proceed when validation returns:
+   - `status = "Valid"`
+   - `details.maxTradableQuantity > 0`
+5. After broadcast, you must run `callput_check_tx_status` until `executed` or `cancelled`.
+6. For existing positions:
+   - pre-expiry: `callput_close_position`
+   - post-expiry: `callput_settle_position`
+
+If status is `cancelled`, refresh chain data and re-select legs. Do not blindly retry with stale legs.
+
+---
 
 ## Data Source
 
-The server fetches active trading options from the **public S3 bucket** used by callput.app:
-```
-https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json
-```
+Primary market listing source:
+- `https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json`
 
-This ensures:
-- ✅ Same data as the frontend
-- ✅ Rich pricing and greeks data
-- ✅ Always up-to-date (refreshed every few minutes)
-- ✅ No AWS credentials required
+Why this matters:
+- Same listing source as frontend
+- Includes mark price, IV, Greeks, availability flags
+- Updated every few minutes
 
-> **Note**: The on-chain `ViewAggregator.getAllOptionToken()` returns vault positions (already sold), not tradable instruments. The S3 bucket contains the actual market data.
+Important:
+- On-chain `ViewAggregator.getAllOptionToken()` is **not** the canonical tradable listing source for agent discovery.
+- Keep `test_connection` for RPC/contract connectivity checks only.
+
+---
 
 ## Installation
 
 ```bash
-npm install
-npm run build
-```
-
-## Testing
-
-Test S3 data fetch:
-```bash
-npm run build
-node build/test_s3_fetch.js
-```
-
-Expected output:
-```
-✅ S3 fetch successful!
-   Total active options available: 200+
-```
-
----
-
-## 🚀 Quick Start for External Agents
-
-### Step 1: Clone and Install
-
-```bash
-# Clone the repository
 git clone https://github.com/ayggdrasil/options_trading_base.git
 cd options_trading_base/callput-agent-mcp
-
-# Install dependencies
 npm install
-
-# Build the server
 npm run build
+```
 
-# Test connection
+## Quick Verification
+
+```bash
 node build/test_s3_fetch.js
 ```
 
-Expected output:
-```
-✅ S3 fetch successful!
-   BTC expiries: 4
-   ETH expiries: 4
-   Total active options available: 214
+Expected:
+- S3 fetch succeeds
+- Active options count is returned
 
-✅ SUCCESS: S3 market data contains active options!
-```
-
-### For External Agent Developers
-
-If you're building an AI agent (like OpenClaw) and want to connect to Callput's on-chain options:
-
+Optional connectivity check (not a tradability check):
 ```bash
-# 1. Clone the repository
-git clone https://github.com/ayggdrasil/options_trading_base.git
-cd options_trading_base
-
-# 2. Install dependencies
-npm install
-
-# 3. Build
-npm run build
-
-# 4. Test connection
 node build/test_connection.js
 ```
 
-Expected output:
-```
-✅ Connected! Current block: 41973480
-✅ Fetched option data from ViewAggregator
-✅ SUCCESS: Server can fetch real option data from Base L2!
-```
-
 ---
 
-## 🔌 Integration with Your Agent
+## MCP Client Integration
 
-### Method 1: Direct MCP Client (Recommended)
+### Claude Desktop
 
-For custom agents (Telegram bots, Discord bots, etc.), use the MCP SDK:
-
-```typescript
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-
-// Connect to MCP server (adjust path to your clone location)
-const transport = new StdioClientTransport({
-  command: "node",
-  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
-  env: { RPC_URL: "https://mainnet.base.org" }
-});
-
-const client = new Client({
-  name: "my-agent",
-  version: "1.0.0"
-}, {
-  capabilities: {}
-});
-
-await client.connect(transport);
-
-// Query options
-const result = await client.callTool({
-  name: "get_option_chains",
-  arguments: { underlying_asset: "WETH" }
-});
-
-console.log(result.content[0].text);
-```
-
-### Step 2: Configure Your Agent
-
-**For Claude Desktop users:**
-
-Add to `claude_desktop_config.json`:
+`claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": [
-        "/path/to/options_trading_base/callput-agent-mcp/build/index.js"
-      ],
+      "args": ["/path/to/options_trading_base/callput-agent-mcp/build/index.js"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -159,267 +83,139 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-> Replace `/path/to/` with your actual clone location, e.g., `/Users/yourname/options_trading_base/`
+### Node.js MCP SDK
 
-**Config file locations:**
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%/Claude/claude_desktop_config.json`
-- Linux: `~/.config/Claude/claude_desktop_config.json`
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
----
+const transport = new StdioClientTransport({
+  command: "node",
+  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
+  env: { RPC_URL: "https://mainnet.base.org" }
+});
 
-## 📖 What This Does
-
-This MCP server acts as a **translator between AI agents and on-chain options markets**. It:
-
-1. **Fetches real option data** from Base L2 (BTC & ETH options)
-2. **Formats data for AI** with human-readable descriptions
-3. **Generates unsigned transactions** for agents to sign and broadcast
-
-**Example agent interaction:**
-```
-User: "Show me WETH Call options expiring in the next month"
-Agent: Uses MCP → "Found options for WETH.
-  Constructing Spreads:
-  1. Buy Call Spread (3000/3200) expiring 20FEB24 (15 days)
-  2. Buy Put Spread (2800/2600) expiring 28FEB24 (23 days)
-  ..."
+const client = new Client({ name: "my-agent", version: "1.0.0" }, { capabilities: {} });
+await client.connect(transport);
 ```
 
 ---
 
-## 🛠️ Available Tools
+## Canonical Tool Set
 
-### `get_option_chains`
-Fetch available option chains for BTC or ETH.
+### Market and Discovery
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_get_greeks`
 
-**Input:**
-```json
-{
-  "underlying_asset": "WETH" // or "WBTC"
-}
-```
+### Execution Guardrails
+- `callput_validate_spread`
+- `callput_approve_usdc`
+- `callput_request_quote`
+- `callput_check_tx_status`
 
-**Output:** Array of options with human-readable formatting:
-```json
-{
-  "underlying_asset": "WETH",
-  "total_options": 2,
-  "options": [{
-    "option_token_id": "123...",
-    "underlying_asset": "WETH",
-    "strategy": "BuyCall",
-    "strike_price": 3000,
-    "expiry": 1730000000,
-    "liquidity": "500000000000000000",
-    "display": {
-      "instrument": "WETH-20FEB24-3000-C",
-      "description": "Buy Call @ 3000 expiring 20FEB24",
-      "type": "Call",
-      "side": "Buy",
-      "days_to_expiry": 15,
-      "liquidity_formatted": "0.5000 WETH"
-    }
-  }]
-}
-```
+### Position Lifecycle
+- `callput_get_my_positions`
+- `callput_close_position`
+- `callput_settle_position`
 
-### `request_quote`
-Generate transaction calldata for opening a position.
-
-**Input:**
-```json
-{
-  "strategy": "BuyCallSpread", // or "BuyPutSpread"
-  "long_leg_id": "123...",     // Token ID for Long Leg
-  "short_leg_id": "124...",    // Token ID for Short Leg
-  "amount": 100,               // Payment amount (USDC)
-  "slippage": 0.5
-}
-```
-
-**Output:** Unsigned transaction payload:
-```json
-{
-  "to": "0x83B04...",
-  "data": "0x1a2b3c...",
-  "value": "50000000000000",
-  "chain_id": 8453,
-  "description": "Open Position for BuyCall..."
-}
-```
+Legacy aliases (backward compatibility only):
+- `get_option_chains`, `get_available_assets`, `validate_spread`, `request_quote`, `get_greeks`
 
 ---
 
-## 📚 Documentation
+## Recommended Execution Loop
 
-- **[Architecture Guide](./ARCHITECTURE.md)** - How the system works
-- **[MCP Setup](./MCP_SETUP.md)** - Integration with AI agents
-- **[Example Output](./EXAMPLE_OUTPUT.md)** - API response samples
-- **[Contributing](./CONTRIBUTING.md)** - How to contribute
-
----
-
-## 🔗 Smart Contracts (Base L2)
-
-- **ViewAggregator**: `0x9060a53f764578230674074cbCa9Daa9fbCa85A8`
-- **PositionManager**: `0x83B04701B227B045CBBAF921377137fF595a54af`
-- **OptionsMarket**: `0xBD40a87CcBD20E44C45F19A074E7d67Ee85327c7`
-
----
-
-## ⚠️ What Agents Must Handle
-
-This server generates **unsigned transactions**. Your agent must:
-
-1. ✅ Manage wallet private keys
-2. ✅ Sign transactions
-3. ✅ Broadcast to Base L2
-4. ✅ Approve ERC20 spending (USDC/WETH → PositionManager)
-5. ✅ Estimate gas fees
-
-**Security Note:** Never expose private keys to the MCP server. Handle all signing client-side.
+1. Discover
+   - `callput_get_available_assets`
+   - `callput_get_market_trends`
+   - `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
+2. Choose two legs (long/short) for spread strategy.
+3. Validate
+   - `callput_validate_spread(strategy, long_leg_id, short_leg_id)`
+4. Approve if needed
+   - `callput_approve_usdc(amount)`
+5. Quote and broadcast
+   - `callput_request_quote(...)`
+6. Verify async keeper status
+   - `callput_check_tx_status(tx_hash, is_open=true)`
+7. If cancelled
+   - refresh chains
+   - choose new legs
+   - validate again
+   - request quote again
 
 ---
 
-## 🏗️ Project Structure
+## Validation Semantics
 
-```
-options_trading_base/
-├── src/
-│   ├── index.ts          # MCP server implementation
-│   ├── config.ts         # Contract addresses & RPC config
-│   ├── abis.ts           # Minimal contract ABIs
-│   └── test_connection.ts # Verification script
-├── README.md
-├── ARCHITECTURE.md       # System design deep dive
-├── MCP_SETUP.md         # Integration guide
-├── EXAMPLE_OUTPUT.md    # API examples
-└── package.json
-```
+`callput_validate_spread` checks:
+- same underlying
+- same expiry
+- strategy-consistent strike direction
+  - Call spread: `longStrike < shortStrike`
+  - Put spread: `longStrike > shortStrike`
+- minimum spread price floor
+  - BTC: `>= 60`
+  - ETH: `>= 3`
+- estimated vault-based `maxTradableQuantity`
 
----
-
-## 🧪 Testing
-
-### Verify connection to Base L2:
-```bash
-npm run build
-node build/test_connection.js
-```
-
-### Use MCP Inspector (manual testing):
-```bash
-npx @modelcontextprotocol/inspector node build/index.js
-```
-
-Opens a web UI at `http://localhost:6274` for manual testing.
+If validation fails, do not quote.
 
 ---
 
-## 🌐 Environment Variables
+## Contracts (Base L2)
 
-```bash
-# Optional: Custom RPC endpoint (defaults to public Base RPC)
-RPC_URL=https://your-base-rpc.com
-```
-
-Create a `.env` file in the project root:
-```
-RPC_URL=https://mainnet.base.org
-```
+- ViewAggregator: `0x9060a53f764578230674074cbCa9Daa9fbCa85A8`
+- PositionManager: `0x83B04701B227B045CBBAF921377137fF595a54af`
+- SettleManager: `0x81A58c7F737a18a8964F62A2C165675C1819E77C`
+- Router: `0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2`
+- USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
 
 ---
 
-## 💬 Example: Telegram Bot Integration
+## Security and Responsibilities
 
-```python
-# Python example for Telegram bot
-import subprocess
-import json
+This MCP server returns **unsigned transactions** only.
 
-def query_options(asset="WETH"):
-    # Start MCP server
-    process = subprocess.Popen(
-        ["node", "build/index.js"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    
-    # Send MCP request
-    request = {
-        "method": "tools/call",
-        "params": {
-            "name": "get_option_chains",
-            "arguments": {"underlying_asset": asset}
-        }
-    }
-    
-    process.stdin.write(json.dumps(request).encode())
-    process.stdin.flush()
-    
-    # Read response
-    response = process.stdout.readline()
-    return json.loads(response)
+Agent side must handle:
+- private key custody
+- signing
+- broadcasting
+- gas policy
+- retries and idempotency
 
-# Use in Telegram handler
-@bot.message_handler(commands=['options'])
-def send_options(message):
-    options = query_options("WETH")
-    bot.reply_to(message, f"Found {len(options)} WETH options")
-```
+Never send private keys into MCP tool arguments or logs.
 
 ---
 
-## 🛣️ Roadmap
+## Troubleshooting
 
-- [x] BTC & ETH option chains
-- [x] Human-readable formatting
-- [x] Transaction generation
-- [ ] Position closing support
-- [ ] Greeks calculation
-- [ ] Historical data
-- [ ] U.S. stock options (future)
+### "Option is not available" or repeated `cancelled`
+- Selected legs are stale or no longer executable.
+- Re-run chain query and validation, then select new legs closer to active liquidity.
 
----
+### Validation says `maxTradableQuantity = 0`
+- Current vault liquidity cannot support this structure.
+- Use different strikes or smaller notional.
 
-## 🐛 Troubleshooting
+### `ERC20: transfer amount exceeds allowance`
+- Run `callput_approve_usdc` first.
+- Ensure spender is Router and token is USDC.
 
-**"Connection failed" error:**
-- Check your internet connection
-- Verify RPC_URL is accessible
-- Try alternative RPC: `https://base.llamarpc.com` or `https://base-rpc.publicnode.com`
-
-**"No options found":**
-- Markets may be inactive
-- Check on callput.app if options are available
-
-**MCP connection issues:**
-- Ensure `npm run build` completed successfully
-- Verify Node.js version >= 18
+### No options returned
+- Validate S3 connectivity with `node build/test_s3_fetch.js`.
 
 ---
 
-## 📄 License
+## Documentation Index
 
-MIT License - see [LICENSE](./LICENSE) file
+- [MCP_SETUP.md](./MCP_SETUP.md)
+- [SKILL.md](./SKILL.md)
+- [EXTERNAL_AGENT_GUIDE.md](./EXTERNAL_AGENT_GUIDE.md)
+- [EXTERNAL_AGENT_GUIDE_KR.md](./EXTERNAL_AGENT_GUIDE_KR.md)
+- [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [EXAMPLE_OUTPUT.md](./EXAMPLE_OUTPUT.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
 
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) first.
-
----
-
-## 🔗 Links
-
-- [Callput Protocol](https://callput.app)
-- [Base L2](https://base.org)
-- [MCP Protocol](https://modelcontextprotocol.io)
-- [OpenClaw Agent](https://openclaw.ai) - Example integration
-
----
-
-**Built for the agentic economy** 🤖⚡

@@ -1,46 +1,47 @@
-# Contributing to Callput Agent MCP Server
+# Contributing to Callput Agent MCP
 
-Thank you for your interest in contributing! 🎉
-
-## Getting Started
-
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/callput-agent-mcp.git`
-3. Create a branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Test thoroughly
-6. Submit a pull request
+Thanks for contributing.
 
 ## Development Setup
 
 ```bash
 npm install
 npm run build
-node build/test_connection.js  # Verify it works
+node build/test_s3_fetch.js
 ```
 
-## Code Style
+Optional connectivity check:
+```bash
+node build/test_connection.js
+```
 
-- TypeScript with strict mode
-- Use `async/await` for promises
-- Add JSDoc comments for public functions
-- Follow existing code patterns
+`test_connection` is for RPC/contract connectivity only. Do not use it as tradability validation.
 
-## Testing
+## Core Contribution Rules
 
-Before submitting, ensure:
-- [ ] Code builds without errors: `npm run build`
-- [ ] Connection test passes: `node build/test_connection.js`
-- [ ] No TypeScript errors
-- [ ] Documentation updated if needed
+1. Keep documentation aligned with `src/index.ts` tool schema.
+2. Preserve spread-only execution semantics in docs and examples.
+3. Do not introduce examples that imply direct vanilla single-leg execution.
+4. Keep close vs settle behavior accurate:
+   - pre-expiry close
+   - post-expiry settle
 
-## Pull Request Guidelines
+## Before Opening PR
 
-- Clear, descriptive title
-- Reference any related issues
-- Describe what changed and why
-- Include test results if applicable
+- [ ] Build passes: `npm run build`
+- [ ] S3 fetch test passes: `node build/test_s3_fetch.js`
+- [ ] If tool schema changed, update these docs:
+  - `README.md`
+  - `SKILL.md`
+  - `MCP_SETUP.md`
+  - `EXTERNAL_AGENT_GUIDE.md`
+  - `EXTERNAL_AGENT_GUIDE_KR.md`
+  - `ARCHITECTURE.md`
+  - `EXAMPLE_OUTPUT.md`
+- [ ] Confirm no stale references to deprecated legacy flow remain
 
-## Questions?
+## Branch and PR Notes
 
-Open an issue for discussion before major changes!
+- Use clear branch and PR titles.
+- Include behavior changes, migration notes, and sample request/response when tool output changes.
+

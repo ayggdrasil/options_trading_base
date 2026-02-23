@@ -1,48 +1,36 @@
-# 🚀 외부 에이전트 설치 및 연동 가이드
+# 외부 에이전트 연동 가이드 (Callput MCP)
 
-이 가이드는 OpenClaw, 커스텀 봇, 또는 기타 AI 프레임워크와 Callput MCP 서버를 연동하는 방법을 설명합니다.
+이 문서는 OpenClaw 및 외부 에이전트가 `callput-agent-mcp`를 연동할 때 발생하는 핵심 오류를 방지하기 위한 운영 가이드입니다.
 
----
+## 목적
 
-## 📦 1단계: 클론 및 설치
+아래 실패를 사전에 차단합니다.
+- 바닐라 단일 레그를 직접 거래하려는 시도
+- 검증(`validate`) 없이 바로 `quote` 호출
+- 유동성이 없는 레그를 반복 재시도
+
+## 빠른 설치
 
 ```bash
 git clone https://github.com/ayggdrasil/options_trading_base.git
 cd options_trading_base/callput-agent-mcp
 npm install
 npm run build
-```
-
-**연결 확인:**
-```bash
 node build/test_s3_fetch.js
 ```
 
-**예상 출력:**
-```
-✅ S3 fetch successful!
-   Total active options available: 214
-```
+예상 결과: 활성 옵션 개수 출력.
 
----
+## 클라이언트 연결
 
-## 🔌 2단계: 에이전트 연결
+### Claude Desktop
 
-### 방법 A: Claude Desktop (개인 사용 추천)
-
-**설정 파일 위치:**
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%/Claude/claude_desktop_config.json`
-
-**설정 내용:**
 ```json
 {
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": [
-        "/path/to/options_trading_base/callput-agent-mcp/build/index.js"
-      ],
+      "args": ["/path/to/options_trading_base/callput-agent-mcp/build/index.js"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -51,170 +39,225 @@ node build/test_s3_fetch.js
 }
 ```
 
-> **중요**: `/path/to/` 부분을 실제 로컬 경로로 변경하세요!
-> 예: `/Users/username/options_trading_base/callput-agent-mcp/build/index.js`
+### Node SDK
 
-설정과 업데이트 후 **Claude Desktop을 재시작**하세요.
-
----
-
-### 방법 B: Node.js 직접 연동
-
-```typescript
+```ts
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["./options_trading_base/callput-agent-mcp/build/index.js"]
+  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
+  env: { RPC_URL: "https://mainnet.base.org" }
 });
 
-const client = new Client({
-  name: "my-agent",
-  version: "1.0.0"
-}, { capabilities: {} });
-
+const client = new Client({ name: "external-agent", version: "1.0.0" }, { capabilities: {} });
 await client.connect(transport);
-
-// 옵션 조회
-const result = await client.callTool({
-  name: "callput_get_option_chains",
-  arguments: { underlying_asset: "ETH" }
-});
-
-console.log(result);
 ```
 
 ---
 
-### 방법 C: Python 연동
+## 표준 툴 세트
 
-```python
-import subprocess
-import json
+### 탐색
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_get_greeks`
 
-# MCP 서버 시작
-process = subprocess.Popen(
-    ["node", "./options_trading_base/callput-agent-mcp/build/index.js"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE
-)
+### 실행
+- `callput_validate_spread`
+- `callput_approve_usdc`
+- `callput_request_quote`
+- `callput_check_tx_status`
 
-# 툴 호출
-request = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-        "name": "callput_get_option_chains",
-        "arguments": {"underlying_asset": "ETH"}
-    }
+### 포지션 관리
+- `callput_get_my_positions`
+- `callput_close_position`
+- `callput_settle_position`
+
+레거시 alias는 호환용입니다. 신규 에이전트는 표준(`callput_*`)만 사용하십시오.
+
+---
+
+## 필수 실행 계약 (강제 규칙)
+
+에이전트 오케스트레이터에서 아래를 반드시 강제하세요.
+
+1. `callput_get_option_chains` 결과는 레그 탐색용입니다.
+2. 바닐라 단일 레그 직접 체결은 금지입니다.
+3. `callput_request_quote` 전에 `callput_validate_spread`를 반드시 호출합니다.
+4. 아래 조건을 동시에 만족해야만 진행합니다.
+   - `status = "Valid"`
+   - `details.maxTradableQuantity > 0`
+5. 브로드캐스트 후 `callput_check_tx_status`를 반드시 수행합니다.
+6. `cancelled`면 기존 calldata 재전송 금지, 레그 재탐색부터 재시작합니다.
+7. 종료는 만기 기준으로 분기합니다.
+   - 만기 전: `callput_close_position`
+   - 만기 후: `callput_settle_position`
+
+---
+
+## 컨텍스트 예산 계약 (필수)
+
+장시간 세션에서 context overflow를 줄이기 위해 아래를 강제하세요.
+
+1. MCP 원본 응답은 즉시 요약하고 폐기합니다.
+   - `expiries` 전체 맵을 장기 메모리에 보관하지 않습니다.
+2. 유지 상태는 최소 필드만 저장합니다.
+   - `asset`, `bias`, `target_expiry`
+   - `candidate_spreads` (최대 5개)
+   - `selected_long_leg_id`, `selected_short_leg_id`
+   - `validation_status`, `maxTradableQuantity`
+   - `tx_hash`, `tx_status`
+3. 사이클당 호출 수를 제한합니다.
+   - 체인 조회 최대 1회
+   - Greeks 조회 최대 6회
+   - Validate 최대 5회
+   - Quote 최대 1회
+4. 입력 범위를 초기에 좁힙니다.
+   - 가능하면 `option_type`, `expiry_date`를 반드시 사용
+   - 전 만기를 반복 조회하는 루프 금지
+5. 상태 폴링은 최신 스냅샷만 유지합니다.
+   - 이전 `check_tx_status` 응답 누적 금지
+6. 로깅은 압축 형태만 사용합니다.
+   - calldata 전체 반복 저장 금지
+   - 해시/레그 ID/최종 상태 중심으로 기록
+7. 컨텍스트가 커지면 압축 상태만 남기고 재부팅합니다.
+   - 필요 시 시장 데이터는 fresh query로 재조회
+
+---
+
+## 권장 운영 플로우 (실서비스)
+
+### 1단계: 탐색
+1. `callput_get_available_assets`
+2. `callput_get_market_trends`
+3. `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
+
+참고:
+- 체인 출력 포맷: `[Strike, Price, Liquidity, MaxQty, OptionID]`
+- Spot 주변 스트라이크 위주로 반환됩니다.
+
+### 2단계: 후보 선정
+- Long/Short 레그를 조합해 스프레드 후보를 만듭니다.
+- 유동성 구간 근처 스트라이크를 우선 선택합니다.
+
+### 3단계: 검증 (필수)
+
+```json
+{
+  "name": "callput_validate_spread",
+  "arguments": {
+    "strategy": "BuyCallSpread",
+    "long_leg_id": "...",
+    "short_leg_id": "..."
+  }
 }
-
-process.stdin.write(json.dumps(request).encode() + b'\n')
-process.stdin.flush()
-
-response = json.loads(process.stdout.readline())
-print(f"Found options: {response}")
 ```
+
+통과 조건:
+- `status = Valid`
+- `details.maxTradableQuantity > 0`
+
+검증 항목:
+- 동일 기초자산/만기
+- 전략별 행사가 방향 일치
+- 최소 스프레드 가격
+  - BTC >= 60
+  - ETH >= 3
+
+### 4단계: 승인
+- allowance 부족 시 `callput_approve_usdc(amount)` 호출
+- 승인 트랜잭션 서명/전송
+
+### 5단계: 견적 및 전송
+- `callput_request_quote(...)` 호출
+- unsigned tx 서명/전송
+- `tx_hash` 저장
+
+### 6단계: 키퍼 상태 확인 루프
+- `callput_check_tx_status(tx_hash, is_open=true)`
+- 15~30초 간격으로 poll
+
+종료 상태:
+- `executed`: 오픈 성공
+- `cancelled`: 1~2단계로 돌아가 레그 재선정 후 재검증
+- `reverted`: 승인/파라미터 점검 후 복구
+
+### 7단계: 포지션 라이프사이클
+- `callput_get_my_positions(address)`로 모니터링
+- 만기 전 청산: `callput_close_position` + `callput_check_tx_status(..., false)`
+- 만기 후 정산: `callput_settle_position`
 
 ---
 
-## 🧪 3단계: MCP Inspector로 테스트
+## 자주 발생하는 실패와 대응
 
-개발 중 디버깅을 위해 강력히 추천합니다.
+### 증상: "Option is not available"
+원인:
+- 레그가 오래되어 체결 시점에 비가용/저유동성
+
+대응:
+- 체인 재조회
+- 레그 재선정
+- 검증 재수행
+- 새 quote 생성
+
+### 증상: `cancelled`
+원인:
+- 요청 이후 가격/유동성 변화로 키퍼 실행 실패
+
+대응:
+- 이전 calldata 재사용 금지
+- 후보 탐색부터 재시작
+
+### 증상: 바닐라 단일 거래 시도
+원인:
+- 체인 출력을 "직접 체결 가능"으로 오해
+
+대응:
+- 정책 레이어에 "스프레드만 체결" 규칙 하드코딩
+
+### 증상: allowance 에러
+원인:
+- 승인 누락 또는 잘못된 spender
+
+대응:
+- `callput_approve_usdc` 실행
+- quote 응답의 approval 정보 재확인
+
+---
+
+## OpenClaw 시스템 프롬프트 블록
+
+OpenClaw 시스템 프롬프트에는 `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/OPENCLAW_SYSTEM_PROMPT.md` 내용을 정책 블록으로 포함하세요.
+
+최소 포함 항목:
+- 스프레드 전용 실행
+- validate 선행 후 quote
+- 브로드캐스트 후 status polling
+- 만기 기준 close/settle 분기
+- 컨텍스트 예산 계약
+
+---
+
+## Inspector 디버깅
 
 ```bash
-cd options_trading_base/callput-agent-mcp
 npx @modelcontextprotocol/inspector node build/index.js
 ```
 
-브라우저에서 http://localhost:6274 접속:
-1. `callput_get_option_chains` 툴 선택.
-2. 인자로 `{"underlying_asset": "ETH"}` 입력.
-3. **200개 이상의 옵션이 보이는지 확인!** ✅
+권장 테스트 순서:
+1. `callput_get_option_chains`
+2. `callput_validate_spread`
+3. `callput_request_quote`
+4. `callput_check_tx_status`
 
 ---
 
-## 📊 사용 가능한 툴 및 워크플로우
+## 보안
 
-성공적인 거래를 위해 반드시 아래의 **6단계 워크플로우**를 준수해야 합니다. 승인(Approval)이나 검증(Verification) 단계를 건너뛰면 거래가 실패합니다.
-
-### 1단계: 분석 및 탐색 (Analysis & Discovery)
-1.  **자산 확인**: `callput_get_available_assets`로 지원 자산(BTC/ETH) 확인.
-2.  **시장 동향**: `callput_get_market_trends`로 현재가, IV, 감성 분석 확인.
-3.  **옵션 조회**: `callput_get_option_chains(underlying_asset)`.
-    - 반환 형식: `[Strike, Price, Liquidity, MaxQty, OptionID]`.
-
-### 2단계: 전략 수립 및 검증 (Strategy & Validation)
-1.  **전략 선택**: `BuyCallSpread` (강세) 또는 `BuyPutSpread` (약세).
-2.  **검증**: `callput_validate_spread(strategy, long_leg_id, short_leg_id)`.
-    - **반드시** `status: "Valid"`이고 `maxTradableQuantity > 0`인지 확인하십시오.
-
-### 3단계: USDC 승인 (Approval - 필수)
-1.  **승인 생성**: `callput_approve_usdc(amount)`.
-    - **Router** 컨트랙트가 사용자의 USDC를 사용할 수 있도록 허용하는 트랜잭션을 생성합니다.
-2.  **실행**: 생성된 트랜잭션을 전송하고 채굴될 때까지 기다립니다.
-
-### 4단계: 거래 실행 (Execution)
-1.  **거래 생성**: `callput_request_quote(strategy, long_leg_id, short_leg_id, amount)`.
-2.  **실행**: 생성된 트랜잭션을 전송합니다. **트랜잭션 해시를 반드시 저장하십시오.**
-
-### 5단계: 거래 결과 검증 (Verification - 필수)
-1.  **상태 확인**: `callput_check_tx_status(tx_hash, is_open=true)`.
-2.  **대기**: 온체인 실행은 비동기 키퍼(Keeper)에 의해 처리됩니다.
-    - 상태가 `pending`이면 15-30초 후 다시 확인하십시오.
-    - 상태가 `executed`이면 포지션 오픈 성공!
-
-### 6단계: 모니터링 및 종료 (Monitoring & Exit)
-1.  **모니터링**: `callput_get_my_positions(address)`로 실시간 PnL 확인.
-2.  **조기 종료**: `callput_close_position(...)` -> `callput_check_tx_status(tx_hash, is_open=false)`로 검증.
-3.  **만기 정산**: 만기 시까지 보유했다면 `callput_settle_position` 사용.
-
----
-
-## 🛠 툴 레퍼런스 (Tool Reference)
-
-### `callput_approve_usdc`
-Router 컨트랙트가 사용자의 USDC를 사용할 수 있도록 승인 트랜잭션을 생성합니다.
-- **입력**: `amount` (예: $100 승인 시 "100")
-
-### `callput_request_quote`
-실제 옵션 거래 트랜잭션 데이터를 생성합니다.
-- **입력**: `strategy`, `long_leg_id`, `short_leg_id`, `amount`, `slippage`
-- **중요**: 생성된 calldata에는 `isBuys`, `isCalls`, `optionIds` 등 온체인 실행에 필요한 모든 데이터가 정확히 포함되어 있습니다.
-
-### `callput_check_tx_status`
-`GenerateRequestKey` 이벤트를 파싱하고 컨트랙트를 조회하여 거래가 **성공(Executed)**, **취소(Cancelled)**, 또는 **대기(Pending)** 중인지 확인합니다.
-- **입력**: `tx_hash`, `is_open` (오픈 시 true, 종료 시 false)
-
-### `callput_get_my_positions`
-활성 포지션 목록과 실시간 mark price 기반 PnL을 가져옵니다.
-
----
-
-## ❓ 문제 해결 (Troubleshooting)
-
-**"옵션이 0개로 보입니다"**
-→ `node build/test_s3_fetch.js`를 실행하여 S3 연결을 확인하세요.
-
-**"ERC20: transfer amount exceeds allowance"**
-→ **중요:** 거래를 위해서는 **USDC 승인**이 필수입니다. `callput_approve_usdc` 툴을 사용하십시오.
-
----
-
-## 📚 추가 리소스
-
-- [README.md](./README.md) - 메인 문서
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 시스템 설계
-
----
-
-## 💬 고객 지원
-
-- GitHub Issues: https://github.com/ayggdrasil/options_trading_base/issues
-- 공식 웹사이트: https://callput.app
-
----
-
-**200개 이상의 활성 옵션으로 거래를 시작하세요!** 🚀
+- 개인키를 MCP 입력/로그로 전달하지 마십시오.
+- 키 보관/서명은 에이전트 런타임에서 처리하십시오.
+- MCP 응답은 unsigned tx 지시로만 취급하십시오.

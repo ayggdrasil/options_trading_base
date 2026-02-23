@@ -1,253 +1,137 @@
-# MCP Server Architecture - How AI Agents Trade on Callput
+# Callput Agent MCP Architecture
 
-This document explains the architecture that enables AI agents (like OpenClaw) to trade options on the Callput protocol.
+This document describes how external agents execute Callput spread trades safely through MCP.
 
-## 🏗️ System Architecture
+## 1. System Overview
 
-```
-┌─────────────────┐
-│  OpenClaw Agent │ (Claude, GPT, or other AI)
-│  - Strategy      │
-│  - Wallet Mgmt   │
-└────────┬────────┘
-         │ MCP Protocol
-         ↓
-┌─────────────────┐
-│   MCP Server    │ (This implementation)
-│  - Query Options │
-│  - Generate TX   │
-└────────┬────────┘
-         │ ethers.js (JSON-RPC)
-         ↓
-┌─────────────────┐
-│   Base L2       │
-│  - ViewAggregator
-│  - PositionManager
-│  - OptionsMarket
-└─────────────────┘
+```text
+Agent Runtime (strategy, wallet, signing)
+        |
+        | MCP
+        v
+Callput MCP Server (this project)
+  - discovery from S3 market feed
+  - spread validation and liquidity checks
+  - unsigned tx generation
+  - async status tracking
+        |
+        | JSON-RPC + HTTP
+        v
+Base L2 contracts + S3 market data
 ```
 
-## 📚 Layer Responsibilities
+## 2. Responsibility Split
 
-### Layer 1: AI Agent (OpenClaw)
-**Role**: Trading strategy and fund management
+### Agent Runtime
+- user intent handling
+- strategy selection
+- private key custody
+- transaction signing and broadcast
+- retry and risk policy
 
-**Responsibilities**:
-- Private key management
-- Transaction signing
-- Gas fee configuration
-- Transaction broadcasting
+### MCP Server
+- market discovery (`callput_get_option_chains`)
+- validation (`callput_validate_spread`)
+- quote generation (`callput_request_quote`)
+- position tools (`close`, `settle`, `status`, `positions`)
 
-### Layer 2: MCP Server (This Project)
-**Role**: Translate blockchain data into AI-readable format
+### On-chain and Data Sources
+- S3 market feed: primary tradable listing context
+- contracts: execution, request status, vault liquidity, settlement
 
-**Capabilities**:
-1. `get_option_chains` - Returns on-chain option data as JSON
-2. `request_quote` - Generates unsigned transaction payloads
+## 3. Key Architectural Rule
 
-### Layer 3: Base L2 (Blockchain)
-**Role**: Execute trades and store state
+`callput_get_option_chains` returns vanilla legs for **selection**, not direct single-leg execution.
 
-## 🔧 Core Components
+Execution path is spread-only via:
+- `callput_validate_spread`
+- `callput_request_quote`
 
-### What is MCP (Model Context Protocol)?
+## 4. Core Data Flow
 
-```typescript
-// MCP is a standard protocol for AI agents to call external tools
-// Agents interact like this:
-const options = await mcp.call("get_option_chains", {...});
+### 4.1 Discovery
+
+```text
+Agent -> callput_get_option_chains
+      -> MCP fetches S3 market-data.json
+      -> filters available options and spot-adjacent strikes
+      -> returns compact arrays [Strike, Price, Liquidity, MaxQty, OptionID]
 ```
 
-**Why MCP?**
-- AI agents struggle with raw ethers.js
-- Converts blockchain data to AI-friendly JSON
-- Provides standardized interface
+### 4.2 Validation
 
-### Data Flow: `get_option_chains`
+`callput_validate_spread` checks:
+- both legs exist in S3 market snapshot
+- same underlying and expiry
+- strike-direction constraints by strategy
+- minimum spread price floor
+  - BTC >= 60
+  - ETH >= 3
+- estimated vault-constrained `maxTradableQuantity`
 
-```
-Agent → MCP Server → ViewAggregator.getAllOptionToken()
-                      ↓
-                   [BigInt Arrays]
-                      ↓
-                   parseOptionTokenId() parsing
-                      ↓
-                   [{
-                     option_token_id: "12345...",
-                     strategy: "BuyCall",
-                     strike_price: 3000,
-                     expiry: 1730000000,
-                     liquidity: "500000"
-                   }] → Agent
-```
+Validation output is the gate for execution.
 
-**Implementation Key**:
-```typescript
-// Re-implemented Utils.sol bit-packing logic in JS
-function parseOptionTokenId(optionTokenId: bigint): ParsedOption {
-    // Parse 256-bit uint via bit shifting
-    const underlyingAssetIndex = (optionTokenId >> 240n) & 0xFFFFn;
-    const expiry = (optionTokenId >> 200n) & 0xFFFFFFFFFFn;
-    // ...
-}
-```
+### 4.3 Quote Generation
 
-### Transaction Generation: `request_quote`
+`callput_request_quote`:
+- re-runs spread validation internally
+- encodes `PositionManager.createOpenPosition` calldata
+- returns unsigned tx payload + approval metadata
 
-```
-Agent → "I want to buy a Call with 100 USDC"
-  ↓
-MCP Server → Prepare PositionManager.createOpenPosition() call
-  ↓
-1. Parse option_token_id
-2. Reconstruct optionIds (bytes32[4])
-3. Prepare parameters:
-   - underlyingAssetIndex: 2 (WETH)
-   - length: 1
-   - isBuys: [true, false, false, false]
-   - strikePrices: [3000, 0, 0, 0]
-   - path: [USDC]
-   - amountIn: 100 * 10^6
-4. Encode calldata with ethers.Interface
-  ↓
-{
-  to: "0x83B04...",       // PositionManager address
-  data: "0x1a2b3c...",    // Encoded calldata
-  value: "50000000000000", // execution fee (0.00005 ETH)
-  chain_id: 8453
-} → Agent
-```
+### 4.4 Async Execution Status
 
-## 💡 Why This Architecture Works
+`callput_check_tx_status`:
+- reads receipt
+- parses `GenerateRequestKey`
+- checks `openPositionRequests` or `closePositionRequests`
+- returns `pending | executed | cancelled` (+ details)
 
-### Problem: AI Agents Can't Directly Handle Smart Contracts
+## 5. Position Lifecycle
 
-Challenges:
-1. Complex bit-packing logic (256-bit uint encoding all data)
-2. ABI encoding/decoding required
-3. Gas fees and slippage calculations
-4. Blockchain RPC communication
+- Open: validate -> quote -> sign/broadcast -> status polling
+- Close (pre-expiry): `callput_close_position` -> status polling (`is_open=false`)
+- Settle (post-expiry): `callput_settle_position`
 
-### Solution: MCP Server as Middleware
+The server enforces expiry guardrails (expired positions must settle, not close).
 
-```
-Before:
-AI Agent → ??? → Smart Contract
-(Impossible)
+## 6. Failure Modes and Recovery
 
-After:
-AI Agent → [MCP: Natural commands] → [MCP Server: Blockchain translation] → Smart Contract
-(Works!)
-```
+### 6.1 `cancelled`
+Likely price/liquidity drift before keeper execution.
 
-## 📖 Real Trading Flow Example
+Recovery:
+1. refresh chains
+2. re-select legs
+3. re-validate
+4. request new quote
 
-```typescript
-// 1. Agent queries market
-const options = await mcp.call("get_option_chains", { 
-  underlying_asset: "WETH" 
-});
-// → [{option_token_id: "123...", strategy: "BuyCall", strike: 3000, ...}]
+### 6.2 Validation fails
+Do not quote. Choose different legs/size and retry.
 
-// 2. Agent decides strategy (AI logic)
-const selected = options.find(o => 
-  o.strategy === "BuyCall" && 
-  o.strike_price === 3000 &&
-  o.expiry > Date.now() / 1000 + 86400 * 7 // 7+ days remaining
-);
+### 6.3 Allowance failures
+Run `callput_approve_usdc` before quote execution.
 
-// 3. Request transaction
-const tx = await mcp.call("request_quote", {
-  option_token_id: selected.option_token_id,
-  amount: 100,
-  is_buy: true
-});
+## 7. Why This Design
 
-// 4. Agent executes (outside MCP scope)
-const wallet = new ethers.Wallet(privateKey, provider);
+- keeps private keys outside MCP
+- makes trading policy explicit and auditable
+- blocks most agent misinterpretations (vanilla direct trading, stale legs)
+- supports deterministic orchestration loops for external agents
 
-// Approve USDC if needed
-await usdc.approve(tx.to, amount);
+## 8. Tool Map
 
-// Sign & send transaction
-const signedTx = await wallet.sendTransaction({
-  to: tx.to,
-  data: tx.data,
-  value: tx.value,
-  gasLimit: 500000
-});
+Canonical tools:
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_get_greeks`
+- `callput_validate_spread`
+- `callput_approve_usdc`
+- `callput_request_quote`
+- `callput_check_tx_status`
+- `callput_get_my_positions`
+- `callput_close_position`
+- `callput_settle_position`
 
-await signedTx.wait(); // ✅ Trade executed
-```
+Legacy aliases remain for backward compatibility only.
 
-## 🚧 What Agents Still Need to Implement
-
-The MCP server handles **read operations + transaction generation**. Agents must implement:
-
-1. **Wallet Management**: Private key storage and signing
-2. **Approval Management**: Check if `USDC.approve(PositionManager, amount)` is needed
-3. **Gas Estimation**: Call `estimateGas()` for optimal gas limits
-4. **Price Verification**: Query market prices to prevent slippage
-5. **Position Management**: Track existing positions and liquidations
-
-## 🎯 Summary
-
-**The MCP server acts as a "blockchain translator"**. AI agents communicate via simple JSON, and the server handles complex smart contract logic. Agents only need to focus on trading strategy!
-
----
-
-## Technical Deep Dive
-
-### Option Token ID Encoding
-
-The Callput protocol uses a 256-bit `uint256` to encode complete option information:
-
-```
-Bit Layout:
-[255:240] underlyingAssetIndex (16 bits)
-[239:200] expiry (40 bits)
-[199:196] strategy (4 bits)
-[195:194] length (2 bits)
-[193]     isBuy[0] (1 bit)
-[192:147] strikePrice[0] (46 bits)
-[146]     isCall[0] (1 bit)
-... (repeated for 4 legs)
-[1:0]     vaultIndex (2 bits)
-```
-
-This encoding allows a single `uint256` to represent complex multi-leg strategies (spreads, straddles, etc).
-
-### Contract Interactions
-
-**ViewAggregator**:
-- `getAllOptionToken()` returns all active options across 3 vaults (S/M/L)
-- Returns: `uint256[][][]` where `[vaultIndex][optionIndex] = [tokenId, liquidity]`
-
-**PositionManager**:
-- `createOpenPosition()` submits a new position request
-- Request goes into a queue, executed by keeper when oracle prices are updated
-- Returns a `bytes32` request key for tracking
-
-**Why Queue-Based?**
-- Prevents front-running
-- Ensures fair pricing via oracle
-- Batches gas costs
-
-### Error Handling
-
-The MCP server returns structured errors:
-```typescript
-{
-  content: [{
-    type: "text",
-    text: "Error: Option ID not found"
-  }],
-  isError: true
-}
-```
-
-Agents should handle:
-- Invalid option IDs
-- Insufficient liquidity
-- Expired options
-- Network failures

@@ -1,183 +1,187 @@
-# Example API Output - Enhanced Human-Readable Format
+# Example Outputs (Current MCP Schema)
 
-## `get_option_chains` Response
+All examples below use canonical tool names from `src/index.ts`.
 
-When an agent calls `get_option_chains` with `underlying_asset: "WETH"`, they now receive:
+## 1) `callput_get_option_chains`
 
+Request:
 ```json
 {
-  "underlying_asset": "WETH",
-  "total_options": 2,
-  "options": [
-    {
-      // Raw blockchain data
-      "option_token_id": "12345678901234567890...",
-      "underlying_asset": "WETH",
-      "strategy": "BuyCall",
-      "strike_price": 3000,
-      "expiry": 1730000000,
-      "liquidity": "500000000000000000",
-      "vault_index": 0,
-      
-      // Human-readable display format
-      "display": {
-        "instrument": "WETH-20FEB24-3000-C",
-        "type": "Call",
-        "side": "Buy",
-        "option_type": "Vanilla",
-        "expiry_date": "2024-02-20",
-        "expiry_formatted": "20FEB24",
-        "days_to_expiry": 45,
-        "strike": 3000,
-        "paired_strike": null,
-        "paired_instrument": null,
-        "description": "Buy Call @ 3000 expiring 20FEB24",
-        "liquidity_formatted": "0.5000 WETH"
-      }
-    },
-    {
-      "option_token_id": "98765432109876543210...",
-      "underlying_asset": "WETH",
-      "strategy": "BuyCallSpread",
-      "strike_price": 3000,
-      "expiry": 1730000000,
-      "liquidity": "1200000000000000000",
-      "vault_index": 0,
-      
-      "display": {
-        "instrument": "WETH-20FEB24-3000-C",
-        "type": "Call",
-        "side": "Buy",
-        "option_type": "Spread",
-        "expiry_date": "2024-02-20",
-        "expiry_formatted": "20FEB24",
-        "days_to_expiry": 45,
-        "strike": 3000,
-        "paired_strike": 3200,
-        "paired_instrument": "WETH-20FEB24-3200-C",
-        "description": "Buy Call Spread (3000/3200) expiring 20FEB24",
-        "liquidity_formatted": "1.2000 WETH"
-      }
-    }
-  ]
-}
-```
-
-## Agent-Friendly Features
-
-### 1. **Instrument Naming**
-- Matches callput.app frontend: `WETH-20FEB24-3000-C`
-- Format: `{ASSET}-{DDMONTHYY}-{STRIKE}-{C|P}`
-
-### 2. **Date Formatting**
-- `expiry_date`: ISO date for machine parsing (`2024-02-20`)
-- `expiry_formatted`: Human-readable (`20FEB24`)
-- `days_to_expiry`: Time until expiration (45 days)
-
-### 3. **Strategy Breakdown**
-- `type`: Call or Put
-- `side`: Buy or Sell
-- `option_type`: Vanilla or Spread
-- `strategy`: Full strategy name (BuyCall, SellPutSpread, etc.)
-
-### 4. **Natural Language Description**
-Agents can directly present to users:
-- "Buy Call @ 3000 expiring 20FEB24"
-- "Buy Call Spread (3000/3200) expiring 20FEB24"
-
-### 5. **Spread Support**
-For spread strategies:
-- `paired_strike`: The second leg's strike price
-- `paired_instrument`: Full instrument name for the paired option
-
-## Usage in Agent Conversations
-
-### Example 1: Simple Query
-**User**: "Show me available WETH options"
-
-**Agent** (using MCP):
-```typescript
-const data = await mcp.call("get_option_chains", { underlying_asset: "WETH" });
-```
-
-**Agent Response**:
-"I found 2 WETH options on Base:
-1. **Debit Call Spread** (3000/3200) expiring 20FEB24
-2. **Debit Put Spread** (2800/2600) expiring 20FEB24"
-
-### Example 2: Filtering and Recommendation
-**User**: "Find me a Call option expiring in about a month"
-
-**Agent Logic**:
-```typescript
-const data = await mcp.call("get_option_chains", { underlying_asset: "WETH" });
-const filtered = data.options.filter(o => 
-  o.display.type === "Call" && 
-  o.display.days_to_expiry >= 25 && 
-  o.display.days_to_expiry <= 35
-);
-```
-
-**Agent Response**:
-"I recommend a **Debit Call Spread (3000/3200)**:
-- Long Call @ 3000
-- Short Call @ 3200
-- Max Profit: 200 - Debit
-- Max Loss: Debit Paid"
-
-## Benefits for Agents
-
-1. **No additional formatting needed** - Display data is ready to present
-2. **Easy filtering** - Use `display.days_to_expiry`, `display.type`, etc.
-3. **Clear communication** - `description` field is ready for user presentation
-4. **Full context** - Both raw data (for transactions) and human-readable format available
-5. **Spread awareness** - Agents can understand multi-leg strategies
-
-## Comparison: Before vs After
-
-### Before (Raw Only)
-```json
-{
-  "underlying_asset": "WETH",
-  "total_options": 2,
-  "options": [
-    {
-      "option_token_id": "123...",
-      "strategy": "BuyCall",
-      "strike_price": 3000,
-      // ...
-    },
-    {
-      "option_token_id": "124...",
-      "strategy": "BuyCall", 
-      "strike_price": 3200,
-      // ...
-    }
-  ]
-}
-```
-
-Agent logic to build spread:
-1. Find Long Leg (e.g. Strike 3000)
-2. Find Short Leg (e.g. Strike 3200)
-3. Call `request_quote` with both IDs
-
-Agent needs to:
-- Convert timestamp to date
-- Format liquidity (divide by 1e18)
-- Generate description text
-- Calculate days to expiry
-
-### After (Enhanced)
-```json
-{
-  ...,
-  "display": {
-    "description": "Buy Call @ 3000 expiring 20FEB24",
-    "days_to_expiry": 45,
-    "liquidity_formatted": "0.5000 WETH"
+  "name": "callput_get_option_chains",
+  "arguments": {
+    "underlying_asset": "WETH"
   }
 }
 ```
 
-Agent can immediately use these values! ✅
+Example response:
+```json
+{
+  "asset": "WETH",
+  "underlying_price": 1996.12,
+  "format": "[Strike, Price, Liquidity, MaxQty, OptionID]",
+  "note": "Showing ~20 strikes around Spot Price. Filtered by user request.",
+  "expiries": {
+    "27FEB26": {
+      "days": 6,
+      "call": [
+        [1800, 196.12, 15188.85, 8.4383, "111..."],
+        [1850, 146.79, 15188.85, 8.2102, "112..."]
+      ],
+      "put": [
+        [1800, 0.47, 15188.85, 8.4383, "211..."]
+      ]
+    }
+  },
+  "last_updated": "2026-02-18T11:06:42.457Z"
+}
+```
+
+Important:
+- This is leg discovery output.
+- Do not directly execute single vanilla legs.
+
+## 2) `callput_validate_spread`
+
+Request:
+```json
+{
+  "name": "callput_validate_spread",
+  "arguments": {
+    "strategy": "BuyCallSpread",
+    "long_leg_id": "111...",
+    "short_leg_id": "112..."
+  }
+}
+```
+
+Valid response:
+```json
+{
+  "status": "Valid",
+  "details": {
+    "asset": "ETH",
+    "spreadCost": 52.33,
+    "longStrike": 1800,
+    "shortStrike": 1850,
+    "longPrice": 196.12,
+    "shortPrice": 143.79,
+    "expiry": 1772140800,
+    "maxTradableQuantity": 289,
+    "longLegParsed": {},
+    "shortLegParsed": {}
+  },
+  "message": "Spread is valid and tradable."
+}
+```
+
+Invalid response example:
+```json
+{
+  "isError": true,
+  "content": [
+    {
+      "type": "text",
+      "text": "Validation Failed: Spread Price too low ($1.40). Minimum allowed is $3 for ETH. Increase Long Strike or decrease Short Strike."
+    }
+  ]
+}
+```
+
+## 3) `callput_request_quote`
+
+Request:
+```json
+{
+  "name": "callput_request_quote",
+  "arguments": {
+    "strategy": "BuyCallSpread",
+    "long_leg_id": "111...",
+    "short_leg_id": "112...",
+    "amount": 100,
+    "slippage": 0.5
+  }
+}
+```
+
+Example response:
+```json
+{
+  "to": "0x83B04701B227B045CBBAF921377137fF595a54af",
+  "data": "0x1a2b3c...",
+  "value": "60000000000000",
+  "chain_id": 8453,
+  "description": "Open Position: BuyCallSpread on ETH (Long $1800 / Short $1850) | Cost: $52.33",
+  "approval_target": "0xfc61ba50AE7B9C4260C9f04631Ff28D5A2Fa4EB2",
+  "approval_token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "instruction": "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'"
+}
+```
+
+## 4) `callput_check_tx_status`
+
+Pending:
+```json
+{
+  "status": "pending",
+  "request_key": "0xabc...",
+  "tx_hash": "0xdef...",
+  "message": "Order is pending execution by the keeper. Check again in ~30 seconds."
+}
+```
+
+Executed:
+```json
+{
+  "status": "executed",
+  "request_key": "0xabc...",
+  "tx_hash": "0xdef...",
+  "account": "0x123...",
+  "option_token_id": "111...",
+  "amount_in": "100000000",
+  "size_out": "287000000000000000",
+  "message": "Position opened successfully!"
+}
+```
+
+Cancelled:
+```json
+{
+  "status": "cancelled",
+  "request_key": "0xabc...",
+  "tx_hash": "0xdef...",
+  "message": "Order was cancelled. This can happen due to price movement or insufficient liquidity. Funds are returned."
+}
+```
+
+If cancelled, refresh legs and restart validation.
+
+## 5) `callput_get_my_positions`
+
+```json
+{
+  "account": "0x123...",
+  "positions": [
+    {
+      "asset": "ETH",
+      "expiry": "Fri, 27 Feb 2026 08:00:00 GMT",
+      "option_id": "111...",
+      "size": "287000000000000000",
+      "avg_price": "52.33",
+      "is_buy": true,
+      "strategy": "BuyCallSpread",
+      "is_settled": false,
+      "pnl": 3.12
+    }
+  ],
+  "total_active_count": 1
+}
+```
+
+## 6) `callput_close_position` vs `callput_settle_position`
+
+- use `callput_close_position` only for non-expired positions
+- use `callput_settle_position` for expired positions
+
+`callput_close_position` on expired option returns an error instructing settlement.
+
