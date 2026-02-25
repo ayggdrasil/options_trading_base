@@ -1,6 +1,6 @@
 # MCP Setup Guide (Callput Agent MCP)
 
-This guide configures the Callput MCP server for Claude Desktop or custom agents.
+This guide configures the canonical Callput MCP server for Claude Desktop or custom agents.
 
 ## 1) Build Server
 
@@ -12,7 +12,7 @@ npm run build
 
 ## 2) Configure MCP Client
 
-### Claude Desktop config
+### Claude Desktop
 
 `claude_desktop_config.json`:
 
@@ -43,7 +43,7 @@ Restart the client after editing.
 node build/test_s3_fetch.js
 ```
 
-This confirms the tradable listing feed. Do not treat `test_connection` as a tradability check.
+This confirms tradable listing feed connectivity.
 
 ## 4) Minimal Tool Smoke Test
 
@@ -55,8 +55,9 @@ npx @modelcontextprotocol/inspector node build/index.js
 
 Then call:
 1. `callput_get_available_assets`
-2. `callput_get_option_chains` with `{"underlying_asset":"WETH"}`
+2. `callput_get_option_chains` with `{"underlying_asset":"ETH"}`
 3. `callput_validate_spread` with candidate legs
+4. `callput_request_quote` with `slippage` (e.g. `0.5`)
 
 ## 5) Required Trading Contract of Behavior
 
@@ -89,11 +90,10 @@ Use canonical names in prompts and orchestrators:
 
 Legacy aliases exist only for backward compatibility.
 
-## 7) Environment Variable
+## 7) Asset Input Rules
 
-Optional:
+Accepted inputs:
+- canonical: `BTC`, `ETH`
+- aliases: `WBTC`, `WETH`
 
-```bash
-RPC_URL=https://mainnet.base.org
-```
-
+For external agent memory/state, always normalize to `BTC`/`ETH`.

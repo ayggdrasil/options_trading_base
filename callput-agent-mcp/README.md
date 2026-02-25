@@ -19,6 +19,14 @@ This server is for **spread trading execution support**. It provides market disc
 
 If status is `cancelled`, refresh chain data and re-select legs. Do not blindly retry with stale legs.
 
+Input normalization:
+- underlying assets: use `BTC`/`ETH` in agent state
+- aliases `WBTC`/`WETH` are accepted by tools
+
+Slippage behavior:
+- `callput_request_quote.slippage` is now applied to on-chain `minSize` protection
+- quote output includes `expected_size`, `min_size`, and raw values
+
 ---
 
 ## Data Source
@@ -130,7 +138,7 @@ Legacy aliases (backward compatibility only):
 1. Discover
    - `callput_get_available_assets`
    - `callput_get_market_trends`
-   - `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
+   - `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)` (recommend `BTC`/`ETH`)
 2. Choose two legs (long/short) for spread strategy.
 3. Validate
    - `callput_validate_spread(strategy, long_leg_id, short_leg_id)`

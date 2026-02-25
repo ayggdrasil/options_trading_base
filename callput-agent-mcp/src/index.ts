@@ -49,7 +49,7 @@ function parseOptionTokenId(optionTokenId: bigint): ParsedOption {
         isBuys[i] = ((optionTokenId >> (193n - BigInt(i * 48))) & 0x1n) !== 0n;
         const strike = Number((optionTokenId >> (147n - BigInt(i * 48))) & 0x3FFFFFFFFFFn);
         strikePrices[i] = strike;
-        isCall[i] = ((optionTokenId >> (146n - BigInt(i * 48))) & 0x1n) === 0n; // 0 = Call
+        isCall[i] = ((optionTokenId >> (146n - BigInt(i * 48))) & 0x1n) !== 0n; // 1 = Call
     }
 
     const vaultIndex = Number(optionTokenId & 0x3n);
@@ -76,6 +76,7 @@ const server = new McpServer({
 const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
 const viewAggregator = new ethers.Contract(CONFIG.CONTRACTS.VIEW_AGGREGATOR, VIEW_AGGREGATOR_ABI, provider);
 const positionManager = new ethers.Contract(CONFIG.CONTRACTS.POSITION_MANAGER, POSITION_MANAGER_ABI, provider);
+const DEFAULT_EXECUTION_FEE = 60000000000000n;
 
 // Cache for decimals to avoid repeated calls
 const decimalsCache: Record<string, number> = {};
@@ -97,13 +98,40 @@ async function getDecimals(tokenAddress: string): Promise<number> {
     }
 }
 
+async function getExecutionFeeWithFallback(): Promise<bigint> {
+    try {
+        return await positionManager.executionFee();
+    } catch (e) {
+        // Public RPCs often rate-limit eth_call; fallback keeps tx generation available.
+        const message = e instanceof Error ? e.message : String(e);
+        console.warn(`Failed to fetch executionFee; using fallback (${message})`);
+        return DEFAULT_EXECUTION_FEE;
+    }
+}
+
 // Register Tools
 server.registerTool(
     "callput_get_option_chains",
     {
-        description: "Retrieve available vanilla option chains (Call/Put) from the Callput protocol. NOTE: These individual options are NOT tradable directly. You must combine a Long Leg and a Short Leg to create a Spread (Call Spread or Put Spread) using `request_quote`.",
+        description: "Retrieve available vanilla option chains (Call/Put) from the Callput protocol. NOTE: These individual options are NOT tradable directly. You must combine a Long Leg and a Short Leg to create a Spread (Call Spread or Put Spread) using `callput_request_quote`.",
         inputSchema: {
-            underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'WBTC', 'WETH')."),
+            underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted."),
+            expiry_date: z.string().optional().describe("Filter by Expiry Date in format DDMMMYY (e.g., '14FEB26'). Returns all if omitted."),
+            option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted.")
+        }
+    },
+    async (args) => {
+        return await handleGetOptionChains(args);
+    }
+);
+
+// Legacy aliases kept for backward compatibility with older clients.
+server.registerTool(
+    "get_option_chains",
+    {
+        description: "Legacy alias of callput_get_option_chains.",
+        inputSchema: {
+            underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted."),
             expiry_date: z.string().optional().describe("Filter by Expiry Date in format DDMMMYY (e.g., '14FEB26'). Returns all if omitted."),
             option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted.")
         }
@@ -117,6 +145,17 @@ server.registerTool(
     "callput_get_available_assets",
     {
         description: "List the underlying assets currently supported for option trading on Callput.",
+        inputSchema: z.object({})
+    },
+    async () => {
+        return await handleGetAvailableAssets();
+    }
+);
+
+server.registerTool(
+    "get_available_assets",
+    {
+        description: "Legacy alias of callput_get_available_assets.",
         inputSchema: z.object({})
     },
     async () => {
@@ -140,6 +179,21 @@ server.registerTool(
 );
 
 server.registerTool(
+    "validate_spread",
+    {
+        description: "Legacy alias of callput_validate_spread.",
+        inputSchema: {
+            strategy: z.enum(["BuyCallSpread", "BuyPutSpread", "SellCallSpread", "SellPutSpread"]).describe("The strategy to validate."),
+            long_leg_id: z.string().describe("The Option Token ID for the Long Leg (Buy)."),
+            short_leg_id: z.string().describe("The Option Token ID for the Short Leg (Sell).")
+        }
+    },
+    async (args) => {
+        return await handleValidateSpread(args);
+    }
+);
+
+server.registerTool(
     "callput_request_quote",
     {
         description: "Generate a transaction payload to buy/sell an option. Returns the calldata for PositionManager.createOpenPosition.",
@@ -148,7 +202,24 @@ server.registerTool(
             long_leg_id: z.string().describe("The Option Token ID for the Long Leg (Buy)."),
             short_leg_id: z.string().describe("The Option Token ID for the Short Leg (Sell)."),
             amount: z.number().positive().describe("The amount of USDC to spend (Premium)."),
-            slippage: z.number().optional().default(0.5).describe("Slippage tolerance percentage.")
+            slippage: z.number().min(0).max(100).optional().default(0.5).describe("Slippage tolerance percentage used to derive on-chain minSize protection.")
+        }
+    },
+    async (args) => {
+        return await handleRequestQuote(args);
+    }
+);
+
+server.registerTool(
+    "request_quote",
+    {
+        description: "Legacy alias of callput_request_quote.",
+        inputSchema: {
+            strategy: z.enum(["BuyCallSpread", "BuyPutSpread", "SellCallSpread", "SellPutSpread"]).describe("The strategy to execute. Currently only Call/Put Spreads are supported."),
+            long_leg_id: z.string().describe("The Option Token ID for the Long Leg (Buy)."),
+            short_leg_id: z.string().describe("The Option Token ID for the Short Leg (Sell)."),
+            amount: z.number().positive().describe("The amount of USDC to spend (Premium)."),
+            slippage: z.number().min(0).max(100).optional().default(0.5).describe("Slippage tolerance percentage used to derive on-chain minSize protection.")
         }
     },
     async (args) => {
@@ -160,6 +231,19 @@ server.registerTool(
     "callput_get_greeks",
     {
         description: "Get Greeks (Delta, Gamma, Vega, Theta) and risk metrics for a specific Option Token ID.",
+        inputSchema: {
+            option_id: z.string().describe("The Option Token ID to look up.")
+        }
+    },
+    async (args) => {
+        return await handleGetGreeks(args);
+    }
+);
+
+server.registerTool(
+    "get_greeks",
+    {
+        description: "Legacy alias of callput_get_greeks.",
         inputSchema: {
             option_id: z.string().describe("The Option Token ID to look up.")
         }
@@ -190,7 +274,7 @@ server.registerTool(
             address: z.string().describe("User's wallet address."),
             option_token_id: z.string().describe("The Option Token ID to close."),
             size: z.string().describe("The amount of the position to close (as a string)."),
-            underlying_asset: z.string().describe("The underlying asset (e.g., 'WBTC', 'WETH').")
+            underlying_asset: z.string().describe("The underlying asset (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted.")
         }
     },
     async (args) => {
@@ -242,7 +326,7 @@ server.registerTool(
         description: "Settle (close) an expired option position. Returns a transaction to sign.",
         inputSchema: {
             option_id: z.string().describe("The Option ID (BigInt string) to settle"),
-            underlying_asset: z.string().describe("The underlying asset (e.g., 'WBTC', 'WETH')")
+            underlying_asset: z.string().describe("The underlying asset (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted.")
         }
     },
     async (args) => {
@@ -259,6 +343,49 @@ async function fetchMarketData() {
     return await response.json();
 }
 
+function getRequestStatusFlags(requestData: any): { status: "pending" | "cancelled" | "executed"; isExecuted: boolean; isCancelled: boolean } {
+    if (requestData && requestData.status !== undefined && requestData.status !== null) {
+        const enumStatus = Number(requestData.status);
+        if (enumStatus === 2) return { status: "executed", isExecuted: true, isCancelled: false };
+        if (enumStatus === 1) return { status: "cancelled", isExecuted: false, isCancelled: true };
+        return { status: "pending", isExecuted: false, isCancelled: false };
+    }
+
+    const isExecuted = Boolean(requestData?.isExecuted);
+    const isCancelled = Boolean(requestData?.isCancelled);
+    if (isExecuted) return { status: "executed", isExecuted: true, isCancelled: false };
+    if (isCancelled) return { status: "cancelled", isExecuted: false, isCancelled: true };
+    return { status: "pending", isExecuted: false, isCancelled: false };
+}
+
+function optionTokenIdToString(optionTokenId: unknown): string {
+    if (typeof optionTokenId === "bigint") return optionTokenId.toString();
+    if (typeof optionTokenId === "number") return String(optionTokenId);
+    if (typeof optionTokenId === "string") {
+        if (optionTokenId.startsWith("0x")) {
+            try {
+                return BigInt(optionTokenId).toString();
+            } catch {
+                return optionTokenId;
+            }
+        }
+        return optionTokenId;
+    }
+    return String(optionTokenId ?? "");
+}
+
+function normalizeUnderlyingAsset(asset: string): "WBTC" | "WETH" | null {
+    const normalized = asset.trim().toUpperCase();
+    if (normalized === "BTC" || normalized === "WBTC") return "WBTC";
+    if (normalized === "ETH" || normalized === "WETH") return "WETH";
+    return null;
+}
+
+function ceilDiv(numerator: bigint, denominator: bigint): bigint {
+    if (denominator <= 0n) throw new Error("Invalid denominator for ceilDiv");
+    return (numerator + denominator - 1n) / denominator;
+}
+
 // Helper for Validation
 async function validateSpreadLogic(
     strategy: string,
@@ -273,6 +400,7 @@ async function validateSpreadLogic(
     let shortMetric: any = null;
     let foundAsset = "";
 
+    const expectedOptionType = strategy.includes("Call") ? "call" : "put";
     const assets = Object.keys(marketData.data.market);
     for (const asset of assets) {
         const market = marketData.data.market[asset];
@@ -280,7 +408,8 @@ async function validateSpreadLogic(
             const opts = market.options[expiry];
             if (!opts) continue;
 
-            for (const leg of [...(opts.call || []), ...(opts.put || [])]) {
+            const legs = expectedOptionType === "call" ? (opts.call || []) : (opts.put || []);
+            for (const leg of legs) {
                 if (leg.optionId === longLegId && !longLegParsed) {
                     longLegParsed = parseOptionTokenId(BigInt(leg.optionId));
                     longMetric = leg;
@@ -301,6 +430,13 @@ async function validateSpreadLogic(
         return { isValid: false, error: "One or both option legs not found in market data." };
     }
 
+    if (!longMetric.isOptionAvailable || !shortMetric.isOptionAvailable) {
+        return {
+            isValid: false,
+            error: "One or both legs are currently unavailable. Refresh chain data and select new legs."
+        };
+    }
+
     // 2. Validate Consistency
     if (longLegParsed.underlyingAssetIndex !== shortLegParsed.underlyingAssetIndex) {
         return { isValid: false, error: "Legs must belong to the same underlying asset." };
@@ -308,14 +444,6 @@ async function validateSpreadLogic(
     // Expiry check
     if (longLegParsed.expiry !== shortLegParsed.expiry) {
         return { isValid: false, error: "Legs must have the same expiry." };
-    }
-
-    // Check if both are calls or both are puts
-    const longIsCall = Boolean(longLegParsed.isCall[0]);
-    const shortIsCall = Boolean(shortLegParsed.isCall[0]);
-
-    if (longIsCall !== shortIsCall) {
-        return { isValid: false, error: "Legs must be both Calls or both Puts." };
     }
 
     // 3. Validate Prices & Spread
@@ -335,36 +463,19 @@ async function validateSpreadLogic(
     }
 
     // 4. Validate Strategy Direction
-    const longStrike = Number(longLegParsed.strikePrices[0]);
-    const shortStrike = Number(shortLegParsed.strikePrices[0]);
+    // Use market-data strike values for user-facing output and direction checks.
+    const longStrike = Number(longMetric.strikePrice);
+    const shortStrike = Number(shortMetric.strikePrice);
     const isCallSpread = strategy.includes("Call");
 
     if (isCallSpread) {
-        // Buy Call Spread: Buy Low Strike, Sell High Strike
-        // Wait, for Buy Call Spread, we usually buy Low and Sell High (Bull Call Spread)
-        // Check logic: Long Strike < Short Strike?
-        // Actually, Callput might have specific definitions. 
-        // Standard Bull Call Spread: Long Call (Lower Strike) + Short Call (Higher Strike) => Debit.
-        // If Long Strike > Short Strike, it's a Bear Call Spread (Credit).
-        // Let's assume Bull Call Spread for "BuyCallSpread".
         if (longStrike >= shortStrike) {
-            // If Long Strike > Short Strike, cost is negative (credit)? No, CallPrice(Low) > CallPrice(High).
-            // So Low - High is positive. 
-            // If Long Strike < Short Strike (Low - High), it's Debit. 
-            // Wait. Call Option Price decreases as Strike increases.
-            // Strike 60000 Call Price > Strike 65000 Call Price.
-            // So Buy 60000, Sell 65000 = Debit. this is Bull Call Spread.
-            // So Long Strike < Short Strike.
+            return { isValid: false, error: `For Call Spread, Long Strike ($${longStrike}) must be < Short Strike ($${shortStrike}) (Buy Low, Sell High)` };
         }
     } else { // Put Spread
-        // Bear Put Spread: Buy High Strike, Sell Low Strike => Debit.
-        // Put Price increases as Strike increases.
-        // Strike 60000 Put Price < Strike 65000 Put Price.
-        // Buy 65000 (High), Sell 60000 (Low) = Debit.
         if (longStrike <= shortStrike) {
             return { isValid: false, error: `For Bear Put Spread, Long Strike ($${longStrike}) must be > Short Strike ($${shortStrike}) (Buy High, Sell Low)` };
         }
-        if (longIsCall) return { isValid: false, error: "Strategy is Put Spread but options are Calls." };
     }
 
     // --- Calculate Available Quantity based on Vault Liquidity ---
@@ -408,7 +519,39 @@ async function validateSpreadLogic(
         }
 
     } catch (e) {
-        console.error("Error calculating max quantity:", e);
+        // Keep validation usable even when public RPC eth_call is flaky.
+        // We intentionally mirror get_option_chains fallback behavior for consistency.
+        const message = e instanceof Error ? e.message : String(e);
+        console.warn(`Failed to calculate max quantity via RPC (${message}). Using fallback liquidity.`);
+
+        let unitRequirement = 0;
+        if (strategy.startsWith("Buy")) {
+            const strikeDiff = Math.abs(longStrike - shortStrike);
+            unitRequirement = strikeDiff;
+        } else if (strategy.startsWith("Sell")) {
+            unitRequirement = Math.abs(spreadCost);
+        }
+
+        const fallbackVaultBalance = 5000; // USDC
+        if (unitRequirement > 0) {
+            maxTradableQuantity = Math.floor(fallbackVaultBalance / unitRequirement);
+        } else {
+            maxTradableQuantity = 0;
+        }
+    }
+
+    if (maxTradableQuantity <= 0) {
+        return {
+            isValid: false,
+            error: "No executable liquidity for this spread right now (maxTradableQuantity=0). Select different legs or reduce risk.",
+            details: {
+                asset: foundAsset,
+                spreadCost,
+                longStrike,
+                shortStrike,
+                maxTradableQuantity
+            }
+        };
     }
 
     return {
@@ -416,8 +559,8 @@ async function validateSpreadLogic(
         details: {
             asset: foundAsset,
             spreadCost: spreadCost,
-            longStrike: Number(longLegParsed.strikePrices[0]),
-            shortStrike: Number(shortLegParsed.strikePrices[0]),
+            longStrike: longStrike,
+            shortStrike: shortStrike,
             longPrice: longPrice,
             shortPrice: shortPrice,
             expiry: longLegParsed.expiry,
@@ -500,6 +643,7 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
         const vaultAddrs = [CONFIG.CONTRACTS.S_VAULT, CONFIG.CONTRACTS.M_VAULT, CONFIG.CONTRACTS.L_VAULT];
         const vaultContracts = vaultAddrs.map(addr => new ethers.Contract(addr, vaultABI, provider));
         const usdcAddr = CONFIG.CONTRACTS.USDC;
+        const fallbackVaultBalance = ethers.parseUnits("5000", 6);
 
         const results = await Promise.all(vaultContracts.map(async (v) => {
             try {
@@ -510,7 +654,9 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
                 const avail = pool - reserved;
                 return avail > 0n ? avail : 0n;
             } catch (e) {
-                return 0n;
+                const message = e instanceof Error ? e.message : String(e);
+                console.warn(`Failed to fetch vault balance; using fallback (${message})`);
+                return fallbackVaultBalance;
             }
         }));
 
@@ -622,7 +768,7 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
     });
 
     const output = {
-        asset: params.underlying_asset,
+        asset: assetName,
         underlying_price: spotPrice,
         format: "[Strike, Price, Liquidity, MaxQty, OptionID]",
         note: "Showing ~20 strikes around Spot Price. Filtered by user request.",
@@ -727,6 +873,13 @@ async function handleRequestQuote(params: {
     const { longStrike, shortStrike, longLegParsed, shortLegParsed, asset: foundAsset, spreadCost } = validation.details;
 
     const longLeg = longLegParsed;
+    const slippagePct = params.slippage ?? 0.5;
+    const normalizedUnderlying = normalizeUnderlyingAsset(foundAsset);
+    if (!normalizedUnderlying) {
+        throw new Error(`Unsupported validated asset: ${foundAsset}`);
+    }
+    const underlyingConfig = CONFIG.ASSETS[normalizedUnderlying];
+    const underlyingDecimals = underlyingConfig.decimals;
 
     // Determine direction and type from strategy
     const isCall = params.strategy === "BuyCallSpread" || params.strategy === "SellCallSpread";
@@ -744,16 +897,24 @@ async function handleRequestQuote(params: {
         ethers.ZeroHash
     ];
 
-    const executionFee = await positionManager.executionFee();
+    const executionFee = await getExecutionFeeWithFallback();
     const USDC = CONFIG.CONTRACTS.USDC;
     // Path: single element [USDC] for USDC-denominated trades (matching frontend)
     const path = [USDC];
 
     const decimals = await getDecimals(USDC);
     const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
+    const spreadCostMicro = Math.max(1, Math.round(spreadCost * 1_000_000));
+    const expectedSizeRaw = (amountIn * (10n ** BigInt(underlyingDecimals))) / BigInt(spreadCostMicro);
+    if (expectedSizeRaw <= 0n) {
+        throw new Error("Amount is too small for current spread price. Increase amount or choose tighter strikes.");
+    }
+    const slippageBps = Math.max(0, Math.min(10_000, Math.round(slippagePct * 100)));
 
     const length = 2;
-    const minSize = 1n; // Minimum size constraint, implies we want at least 1 unit if partial fill? Usually it's min output.
+    const minSize = slippageBps >= 10_000
+        ? 0n
+        : ceilDiv(expectedSizeRaw * BigInt(10_000 - slippageBps), 10_000n);
     const minOutWhenSwap = 0n;
 
     const iface = new ethers.Interface(POSITION_MANAGER_ABI);
@@ -776,9 +937,14 @@ async function handleRequestQuote(params: {
         value: executionFee.toString(),
         chain_id: CONFIG.CHAIN_ID,
         description: `Open Position: ${params.strategy} on ${foundAsset} (Long $${longStrike} / Short $${shortStrike}) | Cost: $${spreadCost.toFixed(2)}`,
+        slippage_pct: slippagePct,
+        expected_size: ethers.formatUnits(expectedSizeRaw, underlyingDecimals),
+        min_size: ethers.formatUnits(minSize, underlyingDecimals),
+        expected_size_raw: expectedSizeRaw.toString(),
+        min_size_raw: minSize.toString(),
         approval_target: CONFIG.CONTRACTS.ROUTER,
         approval_token: CONFIG.CONTRACTS.USDC,
-        instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'"
+        instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'."
     };
 
     return {
@@ -838,8 +1004,13 @@ async function handleGetGreeks(params: { option_id: string }): Promise<CallToolR
         asset: foundAsset,
         strike: foundOption.strikePrice,
         price: foundOption.markPrice,
-        greeks: foundOption.greeks || { delta: 0, gamma: 0, vega: 0, theta: 0 },
-        iv: foundOption.iv || 0
+        greeks: {
+            delta: foundOption.delta ?? foundOption.greeks?.delta ?? 0,
+            gamma: foundOption.gamma ?? foundOption.greeks?.gamma ?? 0,
+            vega: foundOption.vega ?? foundOption.greeks?.vega ?? 0,
+            theta: foundOption.theta ?? foundOption.greeks?.theta ?? 0
+        },
+        iv: foundOption.markIv ?? foundOption.iv ?? 0
     };
 
     return {
@@ -855,29 +1026,31 @@ async function handleGetGreeks(params: { option_id: string }): Promise<CallToolR
 async function handleSettlePosition(params: { option_id: string; underlying_asset: string }): Promise<CallToolResult> {
     try {
         const { option_id, underlying_asset } = params;
-        // Use raw asset name as config keys are WBTC/WETH
-        const assetName = underlying_asset;
-
-        const assetConfig = CONFIG.ASSETS[assetName as keyof typeof CONFIG.ASSETS];
-        if (!assetConfig) {
+        const optionTokenId = BigInt(option_id);
+        const normalizedAsset = normalizeUnderlyingAsset(underlying_asset);
+        if (!normalizedAsset) {
             throw new Error(`Invalid underlying asset: ${underlying_asset}`);
         }
+        const assetName = normalizedAsset;
+        const assetConfig = CONFIG.ASSETS[assetName];
+        const parsed = parseOptionTokenId(optionTokenId);
+        if (parsed.underlyingAssetIndex !== assetConfig.index) {
+            throw new Error(`Underlying asset mismatch. Option belongs to asset index ${parsed.underlyingAssetIndex}, but ${assetName} was provided.`);
+        }
 
-        // Settle Params: address[] _path, uint16 _underlyingAssetIndex, bytes32 _optionId, uint256 _minOut, bool _withdrawETH
+        // Settle Params: address[] _path, uint16 _underlyingAssetIndex, uint256 _optionTokenId, uint256 _minOutWhenSwap, bool _withdrawNAT
         const path = [CONFIG.CONTRACTS.USDC];
-        const minOut = 0;
-        const withdrawETH = false;
+        const minOutWhenSwap = 0n;
+        const withdrawNAT = false;
 
         const iface = new ethers.Interface(SETTLE_MANAGER_ABI);
-        // option_id handling: ensure it's a 32-byte hex string
-        const optionIdHex = ethers.zeroPadValue(ethers.toBeHex(BigInt(option_id)), 32);
 
         const data = iface.encodeFunctionData("settlePosition", [
             path,
             assetConfig.index,
-            optionIdHex,
-            minOut,
-            withdrawETH
+            optionTokenId,
+            minOutWhenSwap,
+            withdrawNAT
         ]);
 
         const output = {
@@ -951,6 +1124,7 @@ async function handleApproveUsdc(params: { amount: string }): Promise<CallToolRe
 async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }): Promise<CallToolResult> {
     try {
         const { tx_hash, is_open } = params;
+        const generateRequestKeyTopic = ethers.id("GenerateRequestKey(address,bytes32,bool)");
 
         // 1. Get Transaction Receipt
         const receipt = await provider.getTransactionReceipt(tx_hash);
@@ -979,7 +1153,11 @@ async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }
                     break;
                 }
             } catch {
-                // Not our event, skip
+                // Fallback for ABI variants where key/isOpen are indexed.
+                if (log.topics?.[0] === generateRequestKeyTopic && log.topics.length >= 3) {
+                    requestKey = log.topics[2];
+                    break;
+                }
             }
         }
 
@@ -998,33 +1176,24 @@ async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }
             requestData = await positionManager.closePositionRequests(requestKey);
         }
 
-        const isExecuted = requestData.isExecuted;
-        const isCancelled = requestData.isCancelled;
-
-        let status: string;
-        if (isExecuted) {
-            status = "executed";
-        } else if (isCancelled) {
-            status = "cancelled";
-        } else {
-            status = "pending";
-        }
+        const { status, isExecuted, isCancelled } = getRequestStatusFlags(requestData);
 
         const output: any = {
             status: status,
             request_key: requestKey,
             tx_hash: tx_hash,
             account: requestData.account,
-            option_token_id: requestData.optionTokenId.toString(),
+            option_token_id: optionTokenIdToString(requestData.optionTokenId),
         };
 
         if (is_open && isExecuted) {
-            output.amount_in = requestData.amountIn.toString();
-            output.size_out = requestData.sizeOut.toString();
+            if (requestData.amountIn !== undefined) output.amount_in = requestData.amountIn.toString();
+            if (requestData.sizeOut !== undefined) output.size_out = requestData.sizeOut.toString();
             output.message = "Position opened successfully!";
         } else if (!is_open && isExecuted) {
-            output.size_delta = requestData.sizeDelta.toString();
-            output.amount_out = requestData.amountOut.toString();
+            const closeSize = requestData.sizeDelta ?? requestData.size;
+            if (closeSize !== undefined) output.size_delta = closeSize.toString();
+            if (requestData.amountOut !== undefined) output.amount_out = requestData.amountOut.toString();
             output.message = "Position closed successfully!";
         } else if (isCancelled) {
             output.message = "Order was cancelled. This can happen due to price movement or insufficient liquidity. Funds are returned.";
@@ -1122,33 +1291,42 @@ async function handleGetMyPositions(params: { address: string }): Promise<CallTo
 async function handleClosePosition(params: { address: string; option_token_id: string; size: string; underlying_asset: string }): Promise<CallToolResult> {
     try {
         const { option_token_id, size, underlying_asset } = params;
-        // Use raw asset name as config keys are WBTC/WETH
-        const assetName = underlying_asset;
+        const optionTokenId = BigInt(option_token_id);
+        const normalizedAsset = normalizeUnderlyingAsset(underlying_asset);
+        if (!normalizedAsset) throw new Error(`Invalid underlying asset: ${underlying_asset}`);
+        const assetName = normalizedAsset;
+        const assetConfig = CONFIG.ASSETS[assetName];
+        const parsed = parseOptionTokenId(optionTokenId);
+        if (parsed.underlyingAssetIndex !== assetConfig.index) {
+            throw new Error(`Underlying asset mismatch. Option belongs to asset index ${parsed.underlyingAssetIndex}, but ${assetName} was provided.`);
+        }
 
-        const assetConfig = CONFIG.ASSETS[assetName as keyof typeof CONFIG.ASSETS];
-        if (!assetConfig) throw new Error(`Invalid underlying asset: ${underlying_asset}`);
+        const now = Math.floor(Date.now() / 1000);
+        if (now >= parsed.expiry) {
+            const expiryIso = new Date(parsed.expiry * 1000).toISOString();
+            throw new Error(`Option already expired (${expiryIso}). Use callput_settle_position instead of callput_close_position.`);
+        }
 
-        // Close Params: uint16 _underlyingAssetIndex, bytes32 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawETH
+        // Close Params: uint16 _underlyingAssetIndex, uint256 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawNAT
         const USDC = CONFIG.CONTRACTS.USDC;
         const path = [USDC]; // Swap profit to USDC
         const minAmountOut = 0n;
         const minOutWhenSwap = 0n;
-        const withdrawETH = false;
+        const withdrawNAT = false;
 
         const iface = new ethers.Interface(POSITION_MANAGER_ABI);
-        const optionIdHex = ethers.zeroPadValue(ethers.toBeHex(BigInt(option_token_id)), 32);
 
         const data = iface.encodeFunctionData("createClosePosition", [
             assetConfig.index,
-            optionIdHex,
+            optionTokenId,
             BigInt(size),
             path,
             minAmountOut,
             minOutWhenSwap,
-            withdrawETH
+            withdrawNAT
         ]);
 
-        const executionFee = await positionManager.executionFee();
+        const executionFee = await getExecutionFeeWithFallback();
 
         const output = {
             to: CONFIG.CONTRACTS.POSITION_MANAGER,
@@ -1190,8 +1368,9 @@ async function handleGetMarketTrends(): Promise<CallToolResult> {
                 const optionsAtExpiry = m.options[expiry] || {};
                 const allOptions = [...(optionsAtExpiry.call || []), ...(optionsAtExpiry.put || [])];
                 allOptions.forEach((o: any) => {
-                    if (o.iv && o.iv > 0) {
-                        totalIv += o.iv;
+                    const optionIv = o.markIv ?? o.iv;
+                    if (typeof optionIv === "number" && optionIv > 0) {
+                        totalIv += optionIv;
                         count++;
                     }
                 });

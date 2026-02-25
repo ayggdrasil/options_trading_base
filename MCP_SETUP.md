@@ -1,13 +1,18 @@
-# MCP Server Configuration Guide
+# MCP Server Configuration Guide (Canonical)
 
-## For Claude Desktop / MCP Clients
+This repository contains legacy MCP code and the current production MCP.
 
-1. Find your MCP configuration file:
-   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+- Canonical server: `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js`
+- Legacy server (do not use for new agents): `/Users/kang/Desktop/01_callput/80_callput_for_agent/mcp-server/build/index.js`
 
-2. Add this server to the `mcpServers` section:
+## Claude Desktop / MCP Client
+
+1. Open your MCP config file:
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+   - Linux: `~/.config/Claude/claude_desktop_config.json`
+
+2. Configure the server path to `callput-agent-mcp`:
 
 ```json
 {
@@ -15,7 +20,7 @@
     "callput": {
       "command": "node",
       "args": [
-        "/Users/kang/Desktop/01_callput/80_callput_for_agent/mcp-server/build/index.js"
+        "/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js"
       ],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
@@ -25,83 +30,52 @@
 }
 ```
 
-3. Restart Claude Desktop
+3. Restart the MCP client.
 
-4. The agent should now see two new tools:
-   - `get_option_chains`
-   - `request_quote`
+## Canonical Tool Names
 
-## For Custom AI Agents
+Use only `callput_*` names for new agents:
 
-If your OpenClaw bot is custom-built, you need to:
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_get_greeks`
+- `callput_validate_spread`
+- `callput_approve_usdc`
+- `callput_request_quote`
+- `callput_check_tx_status`
+- `callput_get_my_positions`
+- `callput_close_position`
+- `callput_settle_position`
 
-1. **Install MCP SDK** in your agent:
-   ```bash
-   npm install @modelcontextprotocol/sdk
-   ```
+Legacy aliases (`get_option_chains`, `request_quote`, etc.) are for backward compatibility only.
 
-2. **Connect via stdio**:
-   ```typescript
-   import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-   import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-   
-   const transport = new StdioClientTransport({
-     command: "node",
-     args: ["/Users/kang/Desktop/01_callput/80_callput_for_agent/mcp-server/build/index.js"],
-     env: { RPC_URL: "https://mainnet.base.org" }
-   });
-   
-   const client = new Client({
-     name: "openclaw-bot",
-     version: "1.0.0",
-   }, {
-     capabilities: {}
-   });
-   
-   await client.connect(transport);
-   
-   // Now you can call tools
-   const result = await client.callTool({
-     name: "get_option_chains",
-     arguments: { underlying_asset: "WETH" }
-   });
-   ```
-
-## Quick Test (Manual)
-
-To test without an agent, you can use the MCP Inspector:
+## Quick Inspector Test
 
 ```bash
-# Install MCP Inspector globally
-npm install -g @modelcontextprotocol/inspector
-
-# Run the inspector
-npx @modelcontextprotocol/inspector node /Users/kang/Desktop/01_callput/80_callput_for_agent/mcp-server/build/index.js
+cd /Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp
+npx @modelcontextprotocol/inspector node build/index.js
 ```
 
-This will open a web UI where you can manually test the tools.
+Run this sequence:
+1. `callput_get_available_assets`
+2. `callput_get_option_chains` with `{"underlying_asset":"ETH"}`
+3. `callput_validate_spread` with candidate legs
+4. `callput_request_quote` after validation success
 
-## Environment Variables
+## Trading Contract of Behavior
 
-Optional configuration:
+1. Option chains are for leg discovery only.
+2. Do not execute single-leg vanilla trades.
+3. Always run validation before quote.
+4. Execute only when `status="Valid"` and `maxTradableQuantity > 0`.
+5. Always run `callput_check_tx_status` after broadcast.
+6. Pre-expiry -> `callput_close_position`, expired -> `callput_settle_position`.
 
-```bash
-# Custom RPC endpoint (default: https://mainnet.base.org)
-export RPC_URL="https://your-custom-base-rpc.com"
-```
+## Asset Input Rules
 
-## Verification
+The following inputs are accepted:
+- Underlying query/settle/close: `BTC`, `ETH`
+- Legacy aliases also accepted: `WBTC`, `WETH`
 
-After connecting, ask your agent to:
-
-1. **Test option query**:
-   ```
-   "Can you show me available WETH options on Callput?"
-   ```
-
-2. **Test quote generation**:
-   ```
-   "Generate a transaction to buy a WETH Call option at strike 3000"
-   ```
-
-The agent should return real data from Base L2!
+Standardize your own agent state to `BTC`/`ETH` to avoid confusion.

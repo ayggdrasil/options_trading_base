@@ -14,6 +14,11 @@ Use this skill when the user asks for:
 ## One-line Intent
 `시장 분석 -> 방향 결정 -> 스프레드 후보 검증 -> 실행/포지션 정리`
 
+## Canonical MCP Target
+- server path: `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js`
+- do not use legacy `/mcp-server/build/index.js` for new agents
+- use canonical tool names: `callput_*` only
+
 ## Non-Negotiable Rules
 
 1. `callput_get_option_chains` output is for leg discovery, not direct single-leg execution.

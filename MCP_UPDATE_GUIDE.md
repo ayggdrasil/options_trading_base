@@ -1,168 +1,69 @@
-# MCP Server Update Guide (for OpenClaw)
+# MCP Update Guide (OpenClaw / External Agents)
 
-## ✅ Current Status
-- **Fix Complete**: Both `callput-agent-mcp` and `mcp-server` are updated.
-- **Verification Successful**: 214 active options found.
-- **Location**: `/Users/kang/Desktop/01_callput/80_callput_for_agent/`
+## Current Canonical Target
 
----
+Use this MCP server path:
 
-## 🚀 Applying the New MCP Server to OpenClaw
+`/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js`
 
-### Method 1: Test with MCP Inspector First (Recommended)
+Do not use the legacy `mcp-server` path for new agent integrations.
+
+## Apply Update
+
+1. Build latest server
 
 ```bash
 cd /Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp
-npx @modelcontextprotocol/inspector node build/index.js
+npm install
+npm run build
 ```
 
-Open http://localhost:6274 in your browser:
-1. Click the `get_option_chains` tool.
-2. Enter `{"underlying_asset": "WETH"}` as arguments.
-3. **Verify you see 214 options!** ✅
+2. Update agent MCP config to canonical path.
 
----
+3. Restart the agent process.
 
-### Method 2: Claude Desktop Configuration (If OpenClaw uses Claude Desktop)
+## Post-Update Smoke Test
 
-**Create or Modify the Config File:**
-```bash
-mkdir -p ~/Library/Application\ Support/Claude
-nano ~/Library/Application\ Support/Claude/claude_desktop_config.json
-```
+### A) Feed + RPC checks
 
-**Configuration Content:**
-```json
-{
-  "mcpServers": {
-    "callput": {
-      "command": "node",
-      "args": [
-        "/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js"
-      ],
-      "env": {
-        "RPC_URL": "https://mainnet.base.org"
-      }
-    }
-  }
-}
-```
-
-**Restart Claude Desktop** is required!
-
----
-
-### Method 3: Direct Programmatic Connection (Custom Agents)
-
-If OpenClaw connects to MCP directly via Node.js/Python:
-
-**Node.js Example:**
-```javascript
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-
-const transport = new StdioClientTransport({
-  command: "node",
-  args: ["/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js"]
-});
-
-const client = new Client({
-  name: "openclaw",
-  version: "1.0.0"
-}, { capabilities: {} });
-
-await client.connect(transport);
-
-// Start using the new version!
-const result = await client.callTool({
-  name: "get_option_chains",
-  arguments: { underlying_asset: "WETH" }
-});
-
-console.log(result); // 214 options! 🎉
-```
-
-**Python Example:**
-```python
-import subprocess
-import json
-
-# Start MCP server
-process = subprocess.Popen(
-    ["node", "/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE
-)
-
-# Call tool
-request = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-        "name": "get_option_chains",
-        "arguments": {"underlying_asset": "WETH"}
-    }
-}
-
-process.stdin.write(json.dumps(request).encode() + b'\n')
-process.stdin.flush()
-
-response = json.loads(process.stdout.readline())
-print(f"Found {response['result']['content'][0]['text']}")  # 214 options!
-```
-
----
-
-## ⚡ Quick Check
-
-**1. Verify the server is working correctly:**
 ```bash
 cd /Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp
 node build/test_s3_fetch.js
+node build/test_connection.js
 ```
 
-**Expected Output:**
-```
-✅ S3 fetch successful!
-   Total active options available: 214
-```
+### B) Tool behavior checks
 
-**2. Check OpenClaw Logs:**
-OpenClaw should now receive 214 options when it calls MCP.
-
----
-
-## 🔧 If OpenClaw is already using another version
-
-**Identify the current path:**
 ```bash
-# Check where OpenClaw is running MCP from
-ps aux | grep "node.*index.js" | grep -v grep
+node build/verify_get_options.js
+node build/verify_validation.js
+node build/verify_transaction.js
+node build/verify_constraints.js
+node build/verify_settle.js
 ```
 
-**Update to the new path:**
-In your OpenClaw configuration or startup script:
-- **AS-IS**: `/old/path/to/mcp-server/build/index.js`
-- **TO-BE**: `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js`
+## Required Tool Contract for External Agents
 
----
+Always use canonical names:
 
-## 📋 Checklist
+- `callput_get_available_assets`
+- `callput_get_market_trends`
+- `callput_get_option_chains`
+- `callput_validate_spread`
+- `callput_request_quote`
+- `callput_check_tx_status`
+- `callput_close_position`
+- `callput_settle_position`
 
-- [x] Test MCP server (`test_s3_fetch.js`) ✅ Already Done
-- [ ] Verify how OpenClaw connects to MCP
-- [ ] Update path in config file or code
-- [ ] Restart OpenClaw
-- [ ] Confirm 214 options in `get_option_chains` output
+Execution rules:
+1. Spread-only execution (no vanilla single-leg execution).
+2. `callput_validate_spread` must pass before `callput_request_quote`.
+3. Execute only when `maxTradableQuantity > 0`.
+4. Re-check status after broadcast; if cancelled, re-select legs and re-quote.
 
----
+## Common Misconfiguration Checklist
 
-## ❓ Not sure how OpenClaw connects to MCP?
-
-Please provide the following information:
-1. What is the OpenClaw startup command?
-2. Where is the configuration file located?
-3. Does OpenClaw documentation mention MCP settings?
-
-Then I can provide more specific update instructions!
+- [ ] MCP path points to `callput-agent-mcp/build/index.js`
+- [ ] Agent prompts use `callput_*` tool names
+- [ ] Underlying symbol normalized to `BTC`/`ETH` in agent state
+- [ ] Legacy aliases are not used in new orchestration logic
