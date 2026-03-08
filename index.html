@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Options Trading Agent MCP - Autonomous Trading on Callput.app</title>
+    <title>Callput Agent Skill + MCP - Autonomous Spread Trading on Base</title>
     <style>
         * {
             margin: 0;
@@ -198,6 +198,69 @@
             height: 120px;
         }
 
+        /* Skill Workflow */
+        .workflow-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-top: 24px;
+        }
+
+        .workflow-step {
+            background: var(--gray);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 82, 255, 0.2);
+            padding: 20px;
+        }
+
+        .step-index {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 10px;
+            background: rgba(0, 82, 255, 0.12);
+            color: var(--primary);
+            border: 1px solid rgba(0, 82, 255, 0.35);
+            font-weight: 700;
+        }
+
+        /* Tool Snapshot */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            margin-top: 24px;
+        }
+
+        .tool-card {
+            background: var(--gray);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 22px;
+        }
+
+        .tool-card ul {
+            margin-top: 12px;
+            padding-left: 18px;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        .tool-card li+li {
+            margin-top: 8px;
+        }
+
+        .pill {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-dim);
+            margin-top: 10px;
+        }
+
         /* Installation */
         .install-steps {
             counter-reset: step;
@@ -368,15 +431,16 @@
 <body>
     <header>
         <div class="container">
-            <h1>🤖 Options Trading Agent MCP</h1>
+            <h1>🤖 Callput Agent Skill + MCP</h1>
             <p class="subtitle">
-                Let your AI agents trade autonomously on <strong>callput.app</strong>. Research strategies, analyze
-                markets, and execute profitable trades on Base L2.
+                The updated <strong>callput-option-trader</strong> workflow lets AI agents analyze markets, validate
+                spreads, request quotes, and manage close/settle lifecycle on Base L2.
             </p>
             <div class="badges">
                 <span class="badge">🔗 Base L2</span>
-                <span class="badge">🤖 MCP Protocol</span>
-                <span class="badge">⚡ Real-time Data</span>
+                <span class="badge">🧠 callput-option-trader Skill</span>
+                <span class="badge">✅ Spread Validation</span>
+                <span class="badge">📡 Real-time S3 Data</span>
                 <span class="badge">🔓 Open Source</span>
             </div>
             <a href="https://github.com/ayggdrasil/options_trading_base" class="cta-button" target="_blank">
@@ -391,36 +455,36 @@
             <h2>🔧 How MCP Works</h2>
             <div class="mechanism">
                 <p style="text-align: center; margin-bottom: 24px;">
-                    The Model Context Protocol (MCP) acts as a translator between AI agents and blockchain smart
-                    contracts.
+                    MCP translates agent intents into safe spread-trading actions: market read, validation, quote
+                    generation, and position lifecycle management.
                 </p>
                 <div class="flow">
                     <div class="flow-item">
                         <div class="flow-icon">👤</div>
                         <h3>User</h3>
                         <p style="font-size: 0.875rem; color: var(--text-dim);">
-                            Commands via Telegram, Discord, etc.
+                            Sends natural-language trading intent
                         </p>
                     </div>
                     <div class="flow-item">
                         <div class="flow-icon">🤖</div>
                         <h3>AI Agent</h3>
                         <p style="font-size: 0.875rem; color: var(--text-dim);">
-                            Processes intent & strategy
+                            Runs 4-step skill workflow
                         </p>
                     </div>
                     <div class="flow-item">
                         <div class="flow-icon">🔌</div>
                         <h3>MCP Server</h3>
                         <p style="font-size: 0.875rem; color: var(--text-dim);">
-                            Fetches data & generates TX
+                            Fetches chains, validates, builds TX
                         </p>
                     </div>
                     <div class="flow-item">
                         <div class="flow-icon">⛓️</div>
                         <h3>Base L2</h3>
                         <p style="font-size: 0.875rem; color: var(--text-dim);">
-                            Executes on-chain trade
+                            Executes signed open/close/settle
                         </p>
                     </div>
                 </div>
@@ -428,18 +492,62 @@
         </div>
     </section>
 
-    <!-- Trading Strategies -->
+    <!-- Skill Workflow -->
     <section style="background: rgba(255,255,255,0.02);">
+        <div class="container">
+            <h2>🧠 Skill Workflow (4 Steps)</h2>
+            <p style="text-align: center; color: var(--text-dim); margin-bottom: 16px;">
+                The new skill standardizes decision flow so agents avoid invalid spreads and expired-position mistakes.
+            </p>
+            <div class="workflow-grid">
+                <div class="workflow-step">
+                    <span class="step-index">STEP 1</span>
+                    <h3>Market Analysis</h3>
+                    <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 8px;">
+                        Discover supported assets, trend context, and option chains for WBTC/WETH.
+                    </p>
+                    <span class="pill">Tools: assets, trends, chains</span>
+                </div>
+                <div class="workflow-step">
+                    <span class="step-index">STEP 2</span>
+                    <h3>Direction Setup</h3>
+                    <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 8px;">
+                        Map bias into spread strategy: bullish (Call Spread) or bearish (Put Spread).
+                    </p>
+                    <span class="pill">Buy/Sell Call/Put Spread</span>
+                </div>
+                <div class="workflow-step">
+                    <span class="step-index">STEP 3</span>
+                    <h3>Tradable Discovery</h3>
+                    <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 8px;">
+                        Use greeks and validation to ensure status is valid and quantity is tradable.
+                    </p>
+                    <span class="pill">Greeks + Validation required</span>
+                </div>
+                <div class="workflow-step">
+                    <span class="step-index">STEP 4</span>
+                    <h3>Trade / Adjustment</h3>
+                    <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 8px;">
+                        Approve, quote, sign, check tx status, then close (pre-expiry) or settle (post-expiry).
+                    </p>
+                    <span class="pill">Open / Close / Settle lifecycle</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Trading Strategies -->
+    <section>
         <div class="container">
             <h2>📊 Available Trading Strategies</h2>
             <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">
-                4 spread strategies × 2 assets (WBTC, WETH) = 8 trading combinations
+                Spread strategies are tradable. Single-leg options are for analysis/leg selection only.
             </p>
             <div class="strategies">
                 <!-- Debit Call Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Debit Call Spread</span>
+                        <span class="strategy-name">BuyCallSpread</span>
                         <span class="strategy-type type-debit">DEBIT</span>
                     </div>
                     <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
@@ -470,7 +578,7 @@
                 <!-- Credit Call Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Credit Call Spread</span>
+                        <span class="strategy-name">SellCallSpread</span>
                         <span class="strategy-type type-credit">CREDIT</span>
                     </div>
                     <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
@@ -498,7 +606,7 @@
                 <!-- Debit Put Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Debit Put Spread</span>
+                        <span class="strategy-name">BuyPutSpread</span>
                         <span class="strategy-type type-debit">DEBIT</span>
                     </div>
                     <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
@@ -526,7 +634,7 @@
                 <!-- Credit Put Spread -->
                 <div class="strategy-card">
                     <div class="strategy-header">
-                        <span class="strategy-name">Credit Put Spread</span>
+                        <span class="strategy-name">SellPutSpread</span>
                         <span class="strategy-type type-credit">CREDIT</span>
                     </div>
                     <p style="font-size: 0.875rem; color: var(--text-dim); margin-bottom: 8px;">
@@ -554,6 +662,48 @@
         </div>
     </section>
 
+    <!-- MCP Tools -->
+    <section style="background: rgba(255,255,255,0.02);">
+        <div class="container">
+            <h2>🛠️ MCP Tools Snapshot</h2>
+            <p style="text-align: center; color: var(--text-dim); margin-bottom: 16px;">
+                Canonical <code>callput_*</code> tools exposed by the updated server.
+            </p>
+            <div class="tools-grid">
+                <div class="tool-card">
+                    <h3>Market & Discovery</h3>
+                    <ul>
+                        <li><code>callput_get_available_assets</code></li>
+                        <li><code>callput_get_market_trends</code></li>
+                        <li><code>callput_get_option_chains</code></li>
+                        <li><code>callput_get_greeks</code></li>
+                    </ul>
+                </div>
+                <div class="tool-card">
+                    <h3>Execution Guardrails</h3>
+                    <ul>
+                        <li><code>callput_validate_spread</code></li>
+                        <li><code>callput_approve_usdc</code></li>
+                        <li><code>callput_request_quote</code></li>
+                        <li><code>callput_check_tx_status</code></li>
+                    </ul>
+                </div>
+                <div class="tool-card">
+                    <h3>Position Lifecycle</h3>
+                    <ul>
+                        <li><code>callput_get_my_positions</code></li>
+                        <li><code>callput_close_position</code></li>
+                        <li><code>callput_settle_position</code></li>
+                    </ul>
+                </div>
+            </div>
+            <p style="text-align: center; color: var(--text-dim); font-size: 0.875rem; margin-top: 16px;">
+                Legacy aliases (for example <code>get_option_chains</code>, <code>request_quote</code>) are still
+                supported for backward compatibility.
+            </p>
+        </div>
+    </section>
+
     <!-- Installation -->
     <section>
         <div class="container">
@@ -562,7 +712,10 @@
                 <div class="install-step">
                     <h3>Clone Repository</h3>
                     <pre><code>git clone https://github.com/ayggdrasil/options_trading_base.git
-cd options_trading_base</code></pre>
+cd <mcp_dir></code></pre>
+                    <p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-dim);">
+                        <code>&lt;mcp_dir&gt;</code> = absolute local path to <code>callput-agent-mcp</code>
+                    </p>
                 </div>
                 <div class="install-step">
                     <h3>Install Dependencies</h3>
@@ -573,10 +726,10 @@ cd options_trading_base</code></pre>
                     <pre><code>npm run build</code></pre>
                 </div>
                 <div class="install-step">
-                    <h3>Test Connection</h3>
-                    <pre><code>node build/test_connection.js</code></pre>
+                    <h3>Test Market Data Connection</h3>
+                    <pre><code>node build/test_s3_fetch.js</code></pre>
                     <p style="margin-top: 12px; font-size: 0.875rem; color: var(--success);">
-                        ✅ You should see: "SUCCESS: Server can fetch real option data from Base L2!"
+                        ✅ You should see active options from S3 market data (200+ instruments)
                     </p>
                 </div>
                 <div class="install-step">
@@ -589,20 +742,26 @@ cd options_trading_base</code></pre>
 PRIVATE_KEY=0x1234567890abcdef...
 RPC_URL=https://mainnet.base.org</code></pre>
                     <p style="margin-top: 12px; font-size: 0.875rem; color: var(--warning);">
-                        ⚠️ Keep private keys secure. Never commit .env files to git.
+                        ⚠️ Keep private keys inside your agent runtime. Never expose keys through MCP output.
                     </p>
                 </div>
                 <div class="install-step">
                     <h3>Integrate with Your Agent</h3>
-                    <p style="margin-bottom: 12px;">Add MCP client to your bot:</p>
+                    <p style="margin-bottom: 12px;">Run the updated validate → quote → check-status flow:</p>
                     <pre><code>import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 const client = new Client({...});
 await client.connect(transport);
 
-// Your agent can now:
-// 1. Query options: client.callTool("get_option_chains", {...);
-// 2. Get quotes: client.callTool("request_quote", {...);
-// 3. Sign & broadcast transactions with wallet</code></pre>
+// 1) Read market + chains
+await client.callTool({ name: "callput_get_market_trends", arguments: {} });
+await client.callTool({ name: "callput_get_option_chains", arguments: { underlying_asset: "WETH" } });
+
+// 2) Validate spread before execution
+await client.callTool({ name: "callput_validate_spread", arguments: { strategy, long_leg_id, short_leg_id } });
+
+// 3) Quote + sign/broadcast + verify status
+await client.callTool({ name: "callput_request_quote", arguments: { strategy, long_leg_id, short_leg_id, amount } });
+await client.callTool({ name: "callput_check_tx_status", arguments: { tx_hash, is_open: true } });</code></pre>
                 </div>
             </div>
         </div>
@@ -613,7 +772,7 @@ await client.connect(transport);
         <div class="container">
             <h2>📈 Recent On-Chain Trading Activity</h2>
             <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">
-                Live data from Base L2 Mainnet
+                Example spread executions aligned with the updated MCP flow
             </p>
             <div class="trades-table">
                 <table>
@@ -643,7 +802,7 @@ await client.connect(transport);
     <footer>
         <div class="container">
             <p style="color: var(--text-dim);">
-                Built for the agentic economy 🤖⚡
+                Built for the agentic economy with Skill + MCP orchestration 🤖⚡
             </p>
             <div class="footer-links">
                 <a href="https://github.com/ayggdrasil/options_trading_base" target="_blank">GitHub</a>
@@ -664,10 +823,10 @@ await client.connect(transport);
                 // For demo purposes, using mock data
                 // In production, this would call ViewAggregator or a backend API
                 const mockTrades = [
-                    { time: '2 mins ago', asset: 'WETH', strategy: 'Buy Call', strike: '3000', expiry: '20FEB24', size: '0.5 ETH' },
-                    { time: '15 mins ago', asset: 'WBTC', strategy: 'Sell Put Spread', strike: '60000/58000', expiry: '28FEB24', size: '0.1 BTC' },
-                    { time: '1 hour ago', asset: 'WETH', strategy: 'Buy Call Spread', strike: '3200/3400', expiry: '06MAR24', size: '1.2 ETH' },
-                    { time: '2 hours ago', asset: 'WBTC', strategy: 'Buy Put', strike: '58000', expiry: '20FEB24', size: '0.05 BTC' },
+                    { time: '3 mins ago', asset: 'WETH', strategy: 'BuyCallSpread', strike: '3000/3200', expiry: '27FEB26', size: '100 USDC' },
+                    { time: '18 mins ago', asset: 'WBTC', strategy: 'SellPutSpread', strike: '90000/86000', expiry: '06MAR26', size: '250 USDC' },
+                    { time: '52 mins ago', asset: 'WETH', strategy: 'BuyPutSpread', strike: '2800/2600', expiry: '13MAR26', size: '75 USDC' },
+                    { time: '2 hours ago', asset: 'WBTC', strategy: 'SellCallSpread', strike: '98000/102000', expiry: '20MAR26', size: '180 USDC' },
                 ];
 
                 const tbody = document.getElementById('trades-body');
