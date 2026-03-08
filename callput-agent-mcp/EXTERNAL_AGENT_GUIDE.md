@@ -1,5 +1,11 @@
 # External Agent Integration Guide (Callput MCP)
 
+## Important Runtime Path Rule
+- `<repo_root>` is a documentation placeholder only.
+- In real OpenClaw/Claude MCP config, replace `<repo_root>` with an absolute local path.
+- Do not keep literal `<repo_root>` in `args` at runtime.
+- Prefer paths without spaces to reduce launcher parsing errors.
+
 This guide is for OpenClaw and other external agents integrating with `callput-agent-mcp`.
 
 `<repo_root>` means the local root directory where this GitHub repository is cloned.

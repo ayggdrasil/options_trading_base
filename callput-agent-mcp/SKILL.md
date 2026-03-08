@@ -6,6 +6,12 @@ license: MIT
 
 # Callput Option Trader (Compact)
 
+## Important Runtime Path Rule
+- `<repo_root>` is a documentation placeholder only.
+- In real OpenClaw/Claude MCP config, you must replace it with an absolute local path.
+- Do not keep literal `<repo_root>` in `args` at runtime.
+- Prefer a path without spaces to avoid launcher parsing issues.
+
 Use this skill when the user asks for:
 - BTC/ETH options market read
 - spread entry (bullish/bearish)

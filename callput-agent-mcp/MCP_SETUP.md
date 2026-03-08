@@ -1,5 +1,11 @@
 # MCP Setup Guide (Callput Agent MCP)
 
+## Important Runtime Path Rule
+- `<repo_root>` is a documentation placeholder only.
+- In real OpenClaw/Claude MCP config, replace `<repo_root>` with an absolute local path.
+- Do not keep literal `<repo_root>` in `args` at runtime.
+- Example runtime path: `/opt/options_trading_base/callput-agent-mcp/build/index.js`.
+
 This guide configures the canonical Callput MCP server for Claude Desktop or custom agents.
 
 `<repo_root>` means the local root directory where this GitHub repository is cloned.
