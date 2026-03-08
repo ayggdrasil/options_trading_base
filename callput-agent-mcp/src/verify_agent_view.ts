@@ -1,8 +1,7 @@
-import { ethers } from "ethers";
 import { CONFIG } from "./config.js";
 
 async function main() {
-    console.log("🔍 Fetching WETH Options for 16FEB26...");
+    console.log("🔍 Fetching WETH Options...");
 
     // 1. Fetch S3 Data
     try {
@@ -22,8 +21,8 @@ async function main() {
             return;
         }
 
-        // Find Expiry
-        const targetDateStr = "16FEB26";
+        // Pick the nearest expiry dynamically.
+        let targetDateStr = "";
         let targetExpiryTimestamp = "";
 
         for (const expiry of market.expiries) {
@@ -34,7 +33,8 @@ async function main() {
             const year = String(d.getUTCFullYear()).slice(-2);
             const fmt = `${day}${month}${year}`;
 
-            if (fmt === targetDateStr) {
+            if (!targetDateStr) {
+                targetDateStr = fmt;
                 targetExpiryTimestamp = expiry;
                 break;
             }

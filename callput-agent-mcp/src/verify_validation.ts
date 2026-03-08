@@ -25,14 +25,17 @@ async function runTest() {
         console.log(`\n1️⃣  Fetching ${asset} Options...`);
 
         const chainsResult: any = await client.callTool({
-            name: "get_option_chains",
+            name: "callput_get_option_chains",
             arguments: { underlying_asset: asset }
         });
+        if (chainsResult.isError) {
+            throw new Error((chainsResult.content?.[0] as any)?.text || "callput_get_option_chains failed");
+        }
         const result = JSON.parse(chainsResult.content[0].text);
 
         // Find valid legs for a spread
         const expiry = Object.keys(result.expiries)[0];
-        const calls = result.expiries[expiry].call; // [Strike, Price, Liq, ID]
+        const calls = result.expiries[expiry].call; // [Strike, Price, Liquidity, MaxQty, OptionID]
 
         let validLong: any = null;
         let validShort: any = null;
@@ -132,16 +135,21 @@ async function runTest() {
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Test 5: Request Quote (Transaction Generation)
-        console.log("\n5️⃣  Testing request_quote (Generate Transaction)...");
+        console.log("\n5️⃣  Testing callput_request_quote (Generate Transaction)...");
         const quoteRes: any = await client.callTool({
-            name: "request_quote",
+            name: "callput_request_quote",
             arguments: {
                 strategy: "BuyCallSpread",
-                long_leg_id: validLong[3], // Option ID
-                short_leg_id: validShort[3], // Option ID
+                long_leg_id: validLong[4], // Option ID
+                short_leg_id: validShort[4], // Option ID
                 amount: 1 // 1 Contract
             }
         });
+
+        if (quoteRes.isError) {
+            console.log("❌ Quote error:", quoteRes.content?.[0]?.text || quoteRes);
+            return;
+        }
 
         if (quoteRes.content && quoteRes.content[0].text) {
             const quoteData = JSON.parse(quoteRes.content[0].text);
@@ -163,7 +171,7 @@ async function runTest() {
     } catch (error: any) {
         console.error("❌ Test Failed:", error);
     } finally {
-        // process.exit(0); // Clean exit? The transport might hang if not closed
+        await client.close();
     }
 }
 

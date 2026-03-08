@@ -24,9 +24,12 @@ async function showSpreads() {
         const minSpreadPrice = asset === "BTC" ? 60 : 3;
 
         const chainsResult: any = await client.callTool({
-            name: "get_option_chains",
+            name: "callput_get_option_chains",
             arguments: { underlying_asset: asset }
         });
+        if (chainsResult.isError) {
+            throw new Error((chainsResult.content?.[0] as any)?.text || "callput_get_option_chains failed");
+        }
 
         const contentStr = chainsResult.content[0].text;
         const result = JSON.parse(contentStr);
@@ -46,7 +49,7 @@ async function showSpreads() {
             console.log("-------------------------------------------------------------------------------");
 
             // Generate Bull Call Spreads (Buy Low Strike, Sell High Strike)
-            const calls = e.call; // [Strike, Price, Liq, ID]
+            const calls = e.call; // [Strike, Price, Liquidity, MaxQty, OptionID]
             let count = 0;
 
             for (let i = 0; i < calls.length; i++) {

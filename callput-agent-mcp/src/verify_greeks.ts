@@ -21,11 +21,15 @@ async function main() {
         // 1. Fetch Option Chains to get a valid Option ID
         console.log("\n1️⃣  Fetching BTC Options to find a valid ID...");
         const chainRes = await client.callTool({
-            name: "get_option_chains",
+            name: "callput_get_option_chains",
             arguments: { underlying_asset: "BTC" },
         });
+        const chainResAny: any = chainRes;
+        if (chainResAny.isError) {
+            throw new Error(chainResAny.content?.[0]?.text || "callput_get_option_chains failed");
+        }
 
-        const chainData = JSON.parse((chainRes.content as any)[0].text);
+        const chainData = JSON.parse(chainResAny.content[0].text);
 
         // Find first valid option ID
         let targetId = "";
@@ -34,7 +38,7 @@ async function main() {
             const firstExp = expiries[0];
             const calls = chainData.expiries[firstExp].call;
             if (calls.length > 0) {
-                targetId = calls[0][3]; // [Strike, Price, Liquidity, OptionID]
+                targetId = calls[0][4]; // [Strike, Price, Liquidity, MaxQty, OptionID]
                 console.log(`✅ Found Option ID: ${targetId} (Strike: ${calls[0][0]})`);
             }
         }
@@ -44,14 +48,18 @@ async function main() {
             process.exit(1);
         }
 
-        // 2. Call get_greeks
+        // 2. Call callput_get_greeks
         console.log(`\n2️⃣  Fetching Greeks for ${targetId}...`);
         const greeksRes = await client.callTool({
-            name: "get_greeks",
+            name: "callput_get_greeks",
             arguments: { option_id: targetId },
         });
+        const greeksResAny: any = greeksRes;
+        if (greeksResAny.isError) {
+            throw new Error(greeksResAny.content?.[0]?.text || "callput_get_greeks failed");
+        }
 
-        const greeksData = JSON.parse((greeksRes.content as any)[0].text);
+        const greeksData = JSON.parse(greeksResAny.content[0].text);
         console.log("✅ Greeks Response:", JSON.stringify(greeksData, null, 2));
 
         if (greeksData.greeks && typeof greeksData.greeks.delta === 'number') {

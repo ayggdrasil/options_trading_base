@@ -1,7 +1,6 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { z } from "zod";
 
 async function runTest() {
     console.log("🚀 Starting Verification Test (SDK Client)...");
@@ -23,27 +22,33 @@ async function runTest() {
         console.log("✅ Connected to MCP Server");
 
         // Step 0: Available Assets
-        console.log("\n0️⃣  Testing get_available_assets...");
+        console.log("\n0️⃣  Testing callput_get_available_assets...");
         const assetsResult: any = await client.callTool({
-            name: "get_available_assets",
+            name: "callput_get_available_assets",
             arguments: {}
         });
+        if (assetsResult.isError) {
+            throw new Error((assetsResult.content?.[0] as any)?.text || "callput_get_available_assets failed");
+        }
         const assets = JSON.parse(assetsResult.content[0].text);
         console.log("✅ Available Assets:", assets.assets);
 
-        // Step 1: get_option_chains
-        console.log("\n1️⃣  Testing get_option_chains...");
+        // Step 1: callput_get_option_chains
+        console.log("\n1️⃣  Testing callput_get_option_chains...");
         const chainsResult: any = await client.callTool({
-            name: "get_option_chains",
+            name: "callput_get_option_chains",
             arguments: { underlying_asset: "ETH" }
         });
+        if (chainsResult.isError) {
+            throw new Error((chainsResult.content?.[0] as any)?.text || "callput_get_option_chains failed");
+        }
 
         const contentStr = chainsResult.content[0].text;
         const result = JSON.parse(contentStr);
 
         console.log(`✅ Asset: ${result.asset}, Spot Price: $${result.underlying_price}`);
 
-        if (result.format !== "[Strike, Price, Liquidity, OptionID]") {
+        if (result.format !== "[Strike, Price, Liquidity, MaxQty, OptionID]") {
             console.error("❌ Invalid Format:", result.format);
             process.exit(1);
         }
@@ -62,7 +67,7 @@ async function runTest() {
         console.log(`✅ Total Options Available: ${totalOptions}`);
 
         const firstExpiry = result.expiries[expiries[0]];
-        const calls = firstExpiry.call; // [Strike, Price, Liq, ID]
+        const calls = firstExpiry.call; // [Strike, Price, Liquidity, MaxQty, OptionID]
 
         if (calls.length < 2) throw new Error("Not enough options to test spread");
 
@@ -76,19 +81,19 @@ async function runTest() {
         const longOpt = calls[0]; // Low Strike (Expensive)
         const shortOpt = calls[calls.length - 1]; // High Strike (Cheap)
 
-        const validLongId = longOpt[3];
+        const validLongId = longOpt[4];
         const validLongPrice = longOpt[1];
-        const validShortId = shortOpt[3];
+        const validShortId = shortOpt[4];
         const validShortPrice = shortOpt[1];
 
         console.log(`🔹 Selected Legs: Long($${longOpt[0]} @ $${validLongPrice}) / Short($${shortOpt[0]} @ $${validShortPrice})`);
         console.log(`🔹 Spread Cost: $${(validLongPrice - validShortPrice).toFixed(2)}`);
 
-        // Step 2: request_quote (Valid)
-        console.log("\n2️⃣  Testing request_quote (High Value Spread)...");
+        // Step 2: callput_request_quote (Valid)
+        console.log("\n2️⃣  Testing callput_request_quote (High Value Spread)...");
         try {
             const quoteResult = await client.callTool({
-                name: "request_quote",
+                name: "callput_request_quote",
                 arguments: {
                     strategy: "BuyCallSpread",
                     long_leg_id: validLongId,
@@ -102,11 +107,11 @@ async function runTest() {
             // process.exit(1); // Don't exit hard, try next step
         }
 
-        // Step 3: request_quote (Invalid Strategy - Wrong Direction or Low Price)
-        console.log("\n3️⃣  Testing request_quote (Invalid Strategy)...");
+        // Step 3: callput_request_quote (Invalid Strategy)
+        console.log("\n3️⃣  Testing callput_request_quote (Invalid Strategy)...");
         try {
             const invalidResult: any = await client.callTool({
-                name: "request_quote",
+                name: "callput_request_quote",
                 arguments: {
                     strategy: "BuyCallSpread",
                     long_leg_id: validShortId, // High Strike (Cheap)

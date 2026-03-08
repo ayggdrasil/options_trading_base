@@ -8,7 +8,15 @@
         "start": "node build/index.js",
         "build": "tsc",
         "dev": "ts-node src/index.ts",
-        "start:stdio": "node build/index.js"
+        "start:stdio": "node build/index.js",
+        "verify:tools": "npx ts-node verify_refactor_tools.ts",
+        "verify:flow": "npx ts-node verify_trade_flow.ts",
+        "verify:advanced": "npx ts-node verify_advanced_features.ts",
+        "verify:e2e": "npx ts-node e2e_agent_test.ts",
+        "verify:input": "npx ts-node verify_input_validation.ts",
+        "verify:bootstrap": "npx ts-node verify_bootstrap.ts",
+        "verify:settle": "npx ts-node verify_settle.ts",
+        "verify:core": "npm run build && node build/test_connection.js && node build/test_s3_fetch.js && npm run verify:tools && npm run verify:flow && npm run verify:advanced && npm run verify:input && npm run verify:bootstrap"
     },
     "keywords": [
         "mcp",

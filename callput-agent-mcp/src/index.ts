@@ -36,6 +36,39 @@ interface ParsedOption {
     vaultIndex: number;
 }
 
+type OptionSide = {
+    optionId: string;
+    strikePrice: number;
+    markPrice?: number;
+    markIv?: number;
+    iv?: number;
+    delta?: number;
+    gamma?: number;
+    vega?: number;
+    theta?: number;
+    greeks?: {
+        delta?: number;
+        gamma?: number;
+        vega?: number;
+        theta?: number;
+    };
+    isOptionAvailable?: boolean;
+};
+
+type AssetMarket = {
+    expiries?: string[];
+    options?: Record<string, { call?: OptionSide[]; put?: OptionSide[] }>;
+};
+
+type MarketDataPayload = {
+    data?: {
+        market?: Record<string, AssetMarket>;
+    };
+    lastUpdatedAt?: string;
+};
+
+const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
 function parseOptionTokenId(optionTokenId: bigint): ParsedOption {
     const underlyingAssetIndex = Number((optionTokenId >> 240n) & 0xFFFFn);
     const expiry = Number((optionTokenId >> 200n) & 0xFFFFFFFFFFn);
@@ -77,25 +110,106 @@ const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
 const viewAggregator = new ethers.Contract(CONFIG.CONTRACTS.VIEW_AGGREGATOR, VIEW_AGGREGATOR_ABI, provider);
 const positionManager = new ethers.Contract(CONFIG.CONTRACTS.POSITION_MANAGER, POSITION_MANAGER_ABI, provider);
 const DEFAULT_EXECUTION_FEE = 60000000000000n;
+const warnedKeys = new Set<string>();
 
 // Cache for decimals to avoid repeated calls
 const decimalsCache: Record<string, number> = {};
 
 async function getDecimals(tokenAddress: string): Promise<number> {
-    if (decimalsCache[tokenAddress]) return decimalsCache[tokenAddress];
+    const cacheKey = tokenAddress.toLowerCase();
+    if (decimalsCache[cacheKey] !== undefined) return decimalsCache[cacheKey];
 
     // Hardcode known tokens to prevent RPC rate-limit issues causing fallback to 18
-    if (tokenAddress.toLowerCase() === CONFIG.CONTRACTS.USDC.toLowerCase()) return 6;
+    if (cacheKey === CONFIG.CONTRACTS.USDC.toLowerCase()) {
+        decimalsCache[cacheKey] = 6;
+        return 6;
+    }
 
     const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
     try {
         const decimals = await contract.decimals();
-        decimalsCache[tokenAddress] = Number(decimals);
+        decimalsCache[cacheKey] = Number(decimals);
         return Number(decimals);
     } catch (e) {
         console.error(`Failed to fetch decimals for ${tokenAddress}`, e);
         return 18; // Default
     }
+}
+
+function formatExpiry(expiryUnix: number): string {
+    const expiryDate = new Date(expiryUnix * 1000);
+    const day = String(expiryDate.getUTCDate()).padStart(2, "0");
+    const month = MONTH_NAMES[expiryDate.getUTCMonth()];
+    const year = String(expiryDate.getUTCFullYear()).slice(-2);
+    return `${day}${month}${year}`;
+}
+
+function normalizeMarketAsset(asset: string): "BTC" | "ETH" | null {
+    const normalized = asset.trim().toUpperCase();
+    if (normalized === "BTC" || normalized === "WBTC") return "BTC";
+    if (normalized === "ETH" || normalized === "WETH") return "ETH";
+    return null;
+}
+
+function parseBigIntInput(raw: string, fieldName: string): bigint {
+    const value = raw?.trim();
+    if (!value) throw new Error(`${fieldName} is required.`);
+    try {
+        return BigInt(value);
+    } catch {
+        throw new Error(`Invalid ${fieldName}: ${raw}`);
+    }
+}
+
+function parsePositiveBigIntInput(raw: string, fieldName: string): bigint {
+    const value = parseBigIntInput(raw, fieldName);
+    if (value <= 0n) throw new Error(`${fieldName} must be greater than 0.`);
+    return value;
+}
+
+function ensureValidAddress(address: string, fieldName: string): void {
+    if (!ethers.isAddress(address)) {
+        throw new Error(`Invalid ${fieldName}: ${address}`);
+    }
+}
+
+function ensureValidTxHash(txHash: string): void {
+    if (!ethers.isHexString(txHash, 32)) {
+        throw new Error(`Invalid tx_hash format: ${txHash}`);
+    }
+}
+
+function isMarketDataPayload(data: unknown): data is MarketDataPayload {
+    if (!data || typeof data !== "object") return false;
+    const root = data as MarketDataPayload;
+    return Boolean(root.data?.market && typeof root.data.market === "object");
+}
+
+function makeToolSuccess<T extends { [key: string]: unknown }>(payload: T, pretty = false): CallToolResult {
+    return {
+        content: [{
+            type: "text" as const,
+            text: JSON.stringify(payload, null, pretty ? 2 : 0),
+        }],
+        structuredContent: payload
+    };
+}
+
+function makeToolError(message: string): CallToolResult {
+    return {
+        content: [{ type: "text" as const, text: message }],
+        isError: true
+    };
+}
+
+function warnOnce(key: string, message: string): void {
+    if (process.env.CALLPUT_VERBOSE_WARNINGS === "1") {
+        console.warn(message);
+        return;
+    }
+    if (warnedKeys.has(key)) return;
+    warnedKeys.add(key);
+    console.warn(message);
 }
 
 async function getExecutionFeeWithFallback(): Promise<bigint> {
@@ -104,12 +218,23 @@ async function getExecutionFeeWithFallback(): Promise<bigint> {
     } catch (e) {
         // Public RPCs often rate-limit eth_call; fallback keeps tx generation available.
         const message = e instanceof Error ? e.message : String(e);
-        console.warn(`Failed to fetch executionFee; using fallback (${message})`);
+        warnOnce("execution_fee_fallback", `Failed to fetch executionFee; using fallback (${message})`);
         return DEFAULT_EXECUTION_FEE;
     }
 }
 
 // Register Tools
+server.registerTool(
+    "callput_get_agent_bootstrap",
+    {
+        description: "Return a compact trading playbook for external agents with no prior context. Includes strict rules, minimal state template, and low-context execution sequence.",
+        inputSchema: z.object({})
+    },
+    async () => {
+        return await handleGetAgentBootstrap();
+    }
+);
+
 server.registerTool(
     "callput_get_option_chains",
     {
@@ -117,7 +242,9 @@ server.registerTool(
         inputSchema: {
             underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted."),
             expiry_date: z.string().optional().describe("Filter by Expiry Date in format DDMMMYY (e.g., '14FEB26'). Returns all if omitted."),
-            option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted.")
+            option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted."),
+            max_expiries: z.number().int().min(1).max(10).optional().describe("Optional compact mode. Limit number of expiries returned when expiry_date is omitted."),
+            max_strikes_per_side: z.number().int().min(2).max(20).optional().describe("Optional compact mode. Number of strikes to keep on each side of spot per option side.")
         }
     },
     async (args) => {
@@ -133,7 +260,9 @@ server.registerTool(
         inputSchema: {
             underlying_asset: z.string().describe("The underlying asset symbol (e.g., 'BTC' or 'ETH'). Legacy aliases 'WBTC'/'WETH' are accepted."),
             expiry_date: z.string().optional().describe("Filter by Expiry Date in format DDMMMYY (e.g., '14FEB26'). Returns all if omitted."),
-            option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted.")
+            option_type: z.enum(["Call", "Put"]).optional().describe("Filter by Option Type. Returns both if omitted."),
+            max_expiries: z.number().int().min(1).max(10).optional().describe("Optional compact mode. Limit number of expiries returned when expiry_date is omitted."),
+            max_strikes_per_side: z.number().int().min(2).max(20).optional().describe("Optional compact mode. Number of strikes to keep on each side of spot per option side.")
         }
     },
     async (args) => {
@@ -336,7 +465,7 @@ server.registerTool(
 );
 
 // Helper to fetch S3 Data
-async function fetchMarketData() {
+async function fetchMarketData(): Promise<MarketDataPayload> {
     const S3_URL = "https://app-data-base.s3.ap-southeast-1.amazonaws.com/market-data.json";
     const response = await fetch(S3_URL);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -386,12 +515,62 @@ function ceilDiv(numerator: bigint, denominator: bigint): bigint {
     return (numerator + denominator - 1n) / denominator;
 }
 
+function buildBootstrapPayload() {
+    return {
+        version: "1.0.0",
+        objective: "Trade Callput spreads safely with minimal context.",
+        mandatory_sequence: [
+            "callput_get_agent_bootstrap",
+            "callput_get_available_assets",
+            "callput_get_market_trends",
+            "callput_get_option_chains",
+            "callput_validate_spread",
+            "callput_approve_usdc",
+            "callput_request_quote",
+            "callput_check_tx_status"
+        ],
+        hard_rules: [
+            "Never trade a single vanilla leg directly.",
+            "Always validate spread before requesting quote.",
+            "Execute only when validation status is Valid and maxTradableQuantity > 0.",
+            "If tx status is cancelled, refresh legs and re-validate before re-quote.",
+            "Use close before expiry; use settle after expiry."
+        ],
+        compact_query_defaults: {
+            max_expiries: 1,
+            max_strikes_per_side: 6
+        },
+        context_budget: {
+            max_candidates: 5,
+            max_greeks_calls: 6,
+            max_validations: 5,
+            max_chain_fetches: 1,
+            max_quote_calls: 1,
+            keep_state_fields: [
+                "asset",
+                "bias",
+                "target_expiry",
+                "selected_long_leg_id",
+                "selected_short_leg_id",
+                "validation_status",
+                "maxTradableQuantity",
+                "tx_hash",
+                "tx_status"
+            ]
+        },
+        quick_commands: [
+            "Analyze ETH bearish, find one valid put spread, execute with checks.",
+            "Check positions, close pre-expiry, settle expired."
+        ]
+    } as const;
+}
+
 // Helper for Validation
 async function validateSpreadLogic(
     strategy: string,
     longLegId: string,
     shortLegId: string,
-    marketData: any
+    marketData: unknown
 ): Promise<{ isValid: boolean; error?: string; details?: any }> {
 
     let longLegParsed: ParsedOption | null = null;
@@ -400,12 +579,25 @@ async function validateSpreadLogic(
     let shortMetric: any = null;
     let foundAsset = "";
 
+    const supportedStrategies = new Set(["BuyCallSpread", "BuyPutSpread", "SellCallSpread", "SellPutSpread"]);
+    if (!supportedStrategies.has(strategy)) {
+        return { isValid: false, error: `Unsupported strategy: ${strategy}` };
+    }
+
+    if (longLegId === shortLegId) {
+        return { isValid: false, error: "long_leg_id and short_leg_id must be different option IDs." };
+    }
+
+    if (!isMarketDataPayload(marketData)) {
+        return { isValid: false, error: "Invalid market data response. Please retry." };
+    }
+
     const expectedOptionType = strategy.includes("Call") ? "call" : "put";
-    const assets = Object.keys(marketData.data.market);
+    const assets = Object.keys(marketData.data!.market!);
     for (const asset of assets) {
-        const market = marketData.data.market[asset];
+        const market = marketData.data!.market![asset];
         for (const expiry of market.expiries || []) {
-            const opts = market.options[expiry];
+            const opts = market.options?.[expiry];
             if (!opts) continue;
 
             const legs = expectedOptionType === "call" ? (opts.call || []) : (opts.put || []);
@@ -447,8 +639,13 @@ async function validateSpreadLogic(
     }
 
     // 3. Validate Prices & Spread
-    const longPrice = longMetric.markPrice || 0;
-    const shortPrice = shortMetric.markPrice || 0;
+    const longPrice = Number(longMetric.markPrice ?? 0);
+    const shortPrice = Number(shortMetric.markPrice ?? 0);
+
+    if (!Number.isFinite(longPrice) || !Number.isFinite(shortPrice)) {
+        return { isValid: false, error: "Invalid pricing data for selected legs." };
+    }
+
     const spreadCost = longPrice - shortPrice;
 
     // Determine min spread price (BTC=60, ETH=3)
@@ -481,7 +678,6 @@ async function validateSpreadLogic(
     // --- Calculate Available Quantity based on Vault Liquidity ---
     let maxTradableQuantity = 0;
     try {
-        const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
         const vaultABI = [
             "function poolAmounts(address token) external view returns (uint256)",
             "function reservedAmounts(address token) external view returns (uint256)"
@@ -522,7 +718,7 @@ async function validateSpreadLogic(
         // Keep validation usable even when public RPC eth_call is flaky.
         // We intentionally mirror get_option_chains fallback behavior for consistency.
         const message = e instanceof Error ? e.message : String(e);
-        console.warn(`Failed to calculate max quantity via RPC (${message}). Using fallback liquidity.`);
+        warnOnce("max_qty_fallback", `Failed to calculate max quantity via RPC (${message}). Using fallback liquidity.`);
 
         let unitRequirement = 0;
         if (strategy.startsWith("Buy")) {
@@ -577,22 +773,29 @@ const getVaultAddress = (index: number) => {
         case 0: return CONFIG.CONTRACTS.S_VAULT;
         case 1: return CONFIG.CONTRACTS.M_VAULT;
         case 2: return CONFIG.CONTRACTS.L_VAULT;
-        default: return CONFIG.CONTRACTS.S_VAULT;
+        default: throw new Error(`Invalid vault index: ${index}`);
     }
 };
 
+async function handleGetAgentBootstrap(): Promise<CallToolResult> {
+    return makeToolSuccess(buildBootstrapPayload(), true);
+}
 
-async function handleGetOptionChains(params: { underlying_asset: string; expiry_date?: string; option_type?: "Call" | "Put" }): Promise<CallToolResult> {
+async function handleGetOptionChains(params: {
+    underlying_asset: string;
+    expiry_date?: string;
+    option_type?: "Call" | "Put";
+    max_expiries?: number;
+    max_strikes_per_side?: number;
+}): Promise<CallToolResult> {
     // 1. Validate Asset
-    let assetName = params.underlying_asset.toUpperCase();
-    if (assetName === "WBTC") assetName = "BTC";
-    if (assetName === "WETH") assetName = "ETH";
+    const assetName = normalizeMarketAsset(params.underlying_asset);
+    const requestedExpiry = params.expiry_date?.trim().toUpperCase();
+    const maxExpiries = Math.max(1, Math.min(10, params.max_expiries ?? 10));
+    const strikeRange = Math.max(2, Math.min(20, params.max_strikes_per_side ?? 10));
 
-    if (!["BTC", "ETH"].includes(assetName)) {
-        return {
-            content: [{ type: "text", text: `Error: Unsupported asset ${assetName}. Only BTC and ETH are supported.` }],
-            isError: true,
-        };
+    if (!assetName) {
+        return makeToolError(`Error: Unsupported asset ${params.underlying_asset}. Only BTC and ETH are supported.`);
     }
 
     // 2. Fetch Market Data from S3
@@ -600,26 +803,20 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
     try {
         marketData = await fetchMarketData();
     } catch (error) {
-        return {
-            content: [{ type: "text", text: "Error: Failed to fetch market data from S3." }],
-            isError: true,
-        };
+        return makeToolError("Error: Failed to fetch market data from S3.");
     }
 
-    if (!marketData.data || !marketData.data.market || !marketData.data.market[assetName]) {
-        return {
-            content: [{ type: "text", text: `Error: No market data found for ${assetName} in S3.` }],
-            isError: true,
-        };
+    if (!isMarketDataPayload(marketData) || !marketData.data?.market?.[assetName]) {
+        return makeToolError(`Error: No market data found for ${assetName} in S3.`);
     }
 
-    const assetMarket = marketData.data.market[assetName];
+    const assetMarket = marketData.data!.market![assetName];
 
     // Estimate Spot Price using Deep ITM Call
     let spotPrice = 0;
     if (assetMarket.expiries && assetMarket.expiries.length > 0) {
         const firstExpiry = assetMarket.expiries[0];
-        const calls = assetMarket.options[firstExpiry]?.call || [];
+        const calls = assetMarket.options?.[firstExpiry]?.call || [];
         if (calls.length > 0) {
             const sortedCalls = [...calls].sort((a: any, b: any) => a.strikePrice - b.strikePrice);
             const deepITMCall = sortedCalls[0];
@@ -631,7 +828,6 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
     }
 
     // Fetch Vault State
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
     const vaultABI = [
         "function poolAmounts(address token) external view returns (uint256)",
         "function reservedAmounts(address token) external view returns (uint256)"
@@ -655,7 +851,7 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
                 return avail > 0n ? avail : 0n;
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);
-                console.warn(`Failed to fetch vault balance; using fallback (${message})`);
+                warnOnce("vault_balance_fallback", `Failed to fetch vault balance; using fallback (${message})`);
                 return fallbackVaultBalance;
             }
         }));
@@ -665,7 +861,8 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
         vaultBalances[2] = Number(ethers.formatUnits(results[2], 6));
 
     } catch (e) {
-        console.error("Failed to fetch vault balances:", e);
+        const message = e instanceof Error ? e.message : String(e);
+        warnOnce("vault_balances_batch_fallback", `Failed to fetch vault balances; using fallback (${message})`);
         vaultBalances[0] = 5000;
         vaultBalances[1] = 5000;
         vaultBalances[2] = 5000;
@@ -692,15 +889,10 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
     };
 
     for (const expiry of assetMarket.expiries || []) {
-        const expiryOptions = assetMarket.options[expiry];
+        const expiryOptions = assetMarket.options?.[expiry];
         if (!expiryOptions) continue;
 
-        const expiryDate = new Date(Number(expiry) * 1000);
-        const day = String(expiryDate.getUTCDate()).padStart(2, '0');
-        const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-        const month = monthNames[expiryDate.getUTCMonth()];
-        const year = String(expiryDate.getUTCFullYear()).slice(-2);
-        const formattedExpiry = `${day}${month}${year}`;
+        const formattedExpiry = formatExpiry(Number(expiry));
 
         const now = Math.floor(Date.now() / 1000);
         const daysToExpiry = Math.floor((Number(expiry) - now) / 86400);
@@ -739,7 +931,7 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
             return options.slice(start, end);
         };
 
-        const range = 10;
+        const range = strikeRange;
 
         if (!params.option_type || params.option_type === "Call") {
             hierarchy[formattedExpiry].call = sliceAroundSpot(allCalls, spotPrice, range);
@@ -753,7 +945,7 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
             delete (hierarchy[formattedExpiry] as any).put;
         }
 
-        if (params.expiry_date && params.expiry_date.toUpperCase() !== formattedExpiry) {
+        if (requestedExpiry && requestedExpiry !== formattedExpiry) {
             delete hierarchy[formattedExpiry];
         }
     }
@@ -767,40 +959,48 @@ async function handleGetOptionChains(params: { underlying_asset: string; expiry_
         }
     });
 
+    if (requestedExpiry && !hierarchy[requestedExpiry]) {
+        const availableExpiries = (assetMarket.expiries || []).map((e) => formatExpiry(Number(e)));
+        return makeToolError(`Error: Expiry ${requestedExpiry} not found for ${assetName}. Available expiries: ${availableExpiries.join(", ")}`);
+    }
+
+    if (!requestedExpiry) {
+        const limitedExpiryKeys = Object.entries(hierarchy)
+            .sort((a, b) => a[1].days - b[1].days)
+            .slice(0, maxExpiries)
+            .map(([key]) => key);
+        const limitedHierarchy: typeof hierarchy = {};
+        for (const key of limitedExpiryKeys) {
+            limitedHierarchy[key] = hierarchy[key];
+        }
+        Object.keys(hierarchy).forEach((key) => {
+            if (!limitedHierarchy[key]) delete hierarchy[key];
+        });
+    }
+
     const output = {
         asset: assetName,
         underlying_price: spotPrice,
         format: "[Strike, Price, Liquidity, MaxQty, OptionID]",
-        note: "Showing ~20 strikes around Spot Price. Filtered by user request.",
+        note: "Showing compact strikes around spot. Use max_expiries/max_strikes_per_side for tighter context control.",
         expiries: hierarchy,
-        last_updated: marketData.lastUpdatedAt,
+        last_updated: marketData.lastUpdatedAt ?? null,
     };
 
-    return {
-        content: [
-            {
-                type: "text" as const,
-                text: JSON.stringify(output),
-            },
-        ],
-        structuredContent: output
-    };
+    return makeToolSuccess(output);
 }
 
 async function handleGetAvailableAssets(): Promise<CallToolResult> {
     try {
         const marketData = await fetchMarketData();
-        const assets = marketData.data?.market ? Object.keys(marketData.data.market) : [];
+        if (!isMarketDataPayload(marketData)) {
+            throw new Error("Invalid market data response.");
+        }
+        const assets = Object.keys(marketData.data!.market!);
 
         const assetDetails = assets.map(asset => {
-            const market = marketData.data.market[asset];
-            const expiries = (market.expiries || []).map((e: string) => {
-                const d = new Date(Number(e) * 1000);
-                const day = String(d.getUTCDate()).padStart(2, '0');
-                const month = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.getUTCMonth()];
-                const year = String(d.getUTCFullYear()).slice(-2);
-                return `${day}${month}${year}`;
-            });
+            const market = marketData.data!.market![asset];
+            const expiries = (market.expiries || []).map((e: string) => formatExpiry(Number(e)));
 
             return {
                 asset: asset,
@@ -813,47 +1013,41 @@ async function handleGetAvailableAssets(): Promise<CallToolResult> {
             description: "List of supported assets and their available expiry dates."
         };
 
-        return {
-            content: [
-                {
-                    type: "text" as const,
-                    text: JSON.stringify(output, null, 2),
-                },
-            ],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error: Failed to fetch available assets. ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error: Failed to fetch available assets. ${error.message}`);
     }
 }
 
 async function handleValidateSpread(params: { strategy: "BuyCallSpread" | "BuyPutSpread" | "SellCallSpread" | "SellPutSpread"; long_leg_id: string; short_leg_id: string }): Promise<CallToolResult> {
-    const marketData = await fetchMarketData();
-    const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
+    try {
+        const marketData = await fetchMarketData();
+        const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
 
-    if (!validation.isValid) {
-        return {
-            content: [{ type: "text" as const, text: `Validation Failed: ${validation.error}` }],
-            isError: true
+        if (!validation.isValid) {
+            return makeToolError(`Validation Failed: ${validation.error}`);
+        }
+
+        const d = validation.details;
+        const output = {
+            status: "Valid",
+            details: {
+                asset: d.asset,
+                spreadCost: d.spreadCost,
+                longStrike: d.longStrike,
+                shortStrike: d.shortStrike,
+                longPrice: d.longPrice,
+                shortPrice: d.shortPrice,
+                expiry: d.expiry,
+                maxTradableQuantity: d.maxTradableQuantity
+            },
+            message: "Spread is valid and tradable."
         };
+
+        return makeToolSuccess(output);
+    } catch (error: any) {
+        return makeToolError(`Error validating spread: ${error.message}`);
     }
-
-    const output = {
-        status: "Valid",
-        details: validation.details,
-        message: "Spread is valid and tradable."
-    };
-
-    return {
-        content: [{
-            type: "text" as const,
-            text: JSON.stringify(output)
-        }],
-        structuredContent: output
-    };
 }
 
 async function handleRequestQuote(params: {
@@ -863,99 +1057,95 @@ async function handleRequestQuote(params: {
     amount: number;
     slippage?: number;
 }): Promise<CallToolResult> {
-    const marketData = await fetchMarketData();
-    const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
+    try {
+        const marketData = await fetchMarketData();
+        const validation = await validateSpreadLogic(params.strategy, params.long_leg_id, params.short_leg_id, marketData);
 
-    if (!validation.isValid) {
-        throw new Error(validation.error);
+        if (!validation.isValid) {
+            return makeToolError(`Validation Failed: ${validation.error}`);
+        }
+
+        const { longStrike, shortStrike, longLegParsed, asset: foundAsset, spreadCost } = validation.details;
+
+        const longLeg = longLegParsed;
+        const slippagePct = params.slippage ?? 0.5;
+        const normalizedUnderlying = normalizeUnderlyingAsset(foundAsset);
+        if (!normalizedUnderlying) {
+            throw new Error(`Unsupported validated asset: ${foundAsset}`);
+        }
+        const underlyingConfig = CONFIG.ASSETS[normalizedUnderlying];
+        const underlyingDecimals = underlyingConfig.decimals;
+
+        // Determine direction and type from strategy
+        const isCall = params.strategy === "BuyCallSpread" || params.strategy === "SellCallSpread";
+        const isBuy = params.strategy === "BuyCallSpread" || params.strategy === "BuyPutSpread";
+
+        // Construct Transaction Payload (matching frontend getIsBuys/getIsCalls)
+        const isBuys: [boolean, boolean, boolean, boolean] = [isBuy, !isBuy, false, false];
+        const isCalls: [boolean, boolean, boolean, boolean] = [isCall, isCall, false, false];
+
+        // Option IDs must be bytes32-padded
+        const optionIds: [string, string, string, string] = [
+            ethers.zeroPadValue(ethers.toBeHex(BigInt(params.long_leg_id)), 32),
+            ethers.zeroPadValue(ethers.toBeHex(BigInt(params.short_leg_id)), 32),
+            ethers.ZeroHash,
+            ethers.ZeroHash
+        ];
+
+        const executionFee = await getExecutionFeeWithFallback();
+        const USDC = CONFIG.CONTRACTS.USDC;
+        // Path: single element [USDC] for USDC-denominated trades (matching frontend)
+        const path = [USDC];
+
+        const decimals = await getDecimals(USDC);
+        const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
+        const spreadCostMicro = Math.max(1, Math.round(spreadCost * 1_000_000));
+        const expectedSizeRaw = (amountIn * (10n ** BigInt(underlyingDecimals))) / BigInt(spreadCostMicro);
+        if (expectedSizeRaw <= 0n) {
+            throw new Error("Amount is too small for current spread price. Increase amount or choose tighter strikes.");
+        }
+        const slippageBps = Math.max(0, Math.min(10_000, Math.round(slippagePct * 100)));
+
+        const length = 2;
+        const minSize = slippageBps >= 10_000
+            ? 0n
+            : ceilDiv(expectedSizeRaw * BigInt(10_000 - slippageBps), 10_000n);
+        const minOutWhenSwap = 0n;
+
+        const iface = new ethers.Interface(POSITION_MANAGER_ABI);
+        const calldata = iface.encodeFunctionData("createOpenPosition", [
+            longLeg.underlyingAssetIndex,
+            length,
+            isBuys,
+            optionIds,
+            isCalls,
+            minSize,
+            path,
+            amountIn,
+            minOutWhenSwap,
+            ethers.ZeroAddress
+        ]);
+
+        const output = {
+            to: CONFIG.CONTRACTS.POSITION_MANAGER,
+            data: calldata,
+            value: executionFee.toString(),
+            chain_id: CONFIG.CHAIN_ID,
+            description: `Open Position: ${params.strategy} on ${foundAsset} (Long $${longStrike} / Short $${shortStrike}) | Cost: $${spreadCost.toFixed(2)}`,
+            slippage_pct: slippagePct,
+            expected_size: ethers.formatUnits(expectedSizeRaw, underlyingDecimals),
+            min_size: ethers.formatUnits(minSize, underlyingDecimals),
+            expected_size_raw: expectedSizeRaw.toString(),
+            min_size_raw: minSize.toString(),
+            approval_target: CONFIG.CONTRACTS.ROUTER,
+            approval_token: CONFIG.CONTRACTS.USDC,
+            instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'."
+        };
+
+        return makeToolSuccess(output, true);
+    } catch (error: any) {
+        return makeToolError(`Error generating quote: ${error.message}`);
     }
-
-    const { longStrike, shortStrike, longLegParsed, shortLegParsed, asset: foundAsset, spreadCost } = validation.details;
-
-    const longLeg = longLegParsed;
-    const slippagePct = params.slippage ?? 0.5;
-    const normalizedUnderlying = normalizeUnderlyingAsset(foundAsset);
-    if (!normalizedUnderlying) {
-        throw new Error(`Unsupported validated asset: ${foundAsset}`);
-    }
-    const underlyingConfig = CONFIG.ASSETS[normalizedUnderlying];
-    const underlyingDecimals = underlyingConfig.decimals;
-
-    // Determine direction and type from strategy
-    const isCall = params.strategy === "BuyCallSpread" || params.strategy === "SellCallSpread";
-    const isBuy = params.strategy === "BuyCallSpread" || params.strategy === "BuyPutSpread";
-
-    // Construct Transaction Payload (matching frontend getIsBuys/getIsCalls)
-    const isBuys: [boolean, boolean, boolean, boolean] = [isBuy, !isBuy, false, false];
-    const isCalls: [boolean, boolean, boolean, boolean] = [isCall, isCall, false, false];
-
-    // Option IDs must be bytes32-padded
-    const optionIds: [string, string, string, string] = [
-        ethers.zeroPadValue(ethers.toBeHex(BigInt(params.long_leg_id)), 32),
-        ethers.zeroPadValue(ethers.toBeHex(BigInt(params.short_leg_id)), 32),
-        ethers.ZeroHash,
-        ethers.ZeroHash
-    ];
-
-    const executionFee = await getExecutionFeeWithFallback();
-    const USDC = CONFIG.CONTRACTS.USDC;
-    // Path: single element [USDC] for USDC-denominated trades (matching frontend)
-    const path = [USDC];
-
-    const decimals = await getDecimals(USDC);
-    const amountIn = ethers.parseUnits(params.amount.toString(), decimals);
-    const spreadCostMicro = Math.max(1, Math.round(spreadCost * 1_000_000));
-    const expectedSizeRaw = (amountIn * (10n ** BigInt(underlyingDecimals))) / BigInt(spreadCostMicro);
-    if (expectedSizeRaw <= 0n) {
-        throw new Error("Amount is too small for current spread price. Increase amount or choose tighter strikes.");
-    }
-    const slippageBps = Math.max(0, Math.min(10_000, Math.round(slippagePct * 100)));
-
-    const length = 2;
-    const minSize = slippageBps >= 10_000
-        ? 0n
-        : ceilDiv(expectedSizeRaw * BigInt(10_000 - slippageBps), 10_000n);
-    const minOutWhenSwap = 0n;
-
-    const iface = new ethers.Interface(POSITION_MANAGER_ABI);
-    const calldata = iface.encodeFunctionData("createOpenPosition", [
-        longLeg.underlyingAssetIndex,
-        length,
-        isBuys,
-        optionIds,
-        isCalls,
-        minSize,
-        path,
-        amountIn,
-        minOutWhenSwap,
-        ethers.ZeroAddress
-    ]);
-
-    const output = {
-        to: CONFIG.CONTRACTS.POSITION_MANAGER,
-        data: calldata,
-        value: executionFee.toString(),
-        chain_id: CONFIG.CHAIN_ID,
-        description: `Open Position: ${params.strategy} on ${foundAsset} (Long $${longStrike} / Short $${shortStrike}) | Cost: $${spreadCost.toFixed(2)}`,
-        slippage_pct: slippagePct,
-        expected_size: ethers.formatUnits(expectedSizeRaw, underlyingDecimals),
-        min_size: ethers.formatUnits(minSize, underlyingDecimals),
-        expected_size_raw: expectedSizeRaw.toString(),
-        min_size_raw: minSize.toString(),
-        approval_target: CONFIG.CONTRACTS.ROUTER,
-        approval_token: CONFIG.CONTRACTS.USDC,
-        instruction: "Ensure you have approved 'approval_token' (USDC) for 'approval_target' (Router) to spend amount >= 'amount'."
-    };
-
-    return {
-        content: [
-            {
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2),
-            },
-        ],
-        structuredContent: output
-    };
 }
 
 async function handleGetGreeks(params: { option_id: string }): Promise<CallToolResult> {
@@ -965,38 +1155,34 @@ async function handleGetGreeks(params: { option_id: string }): Promise<CallToolR
     try {
         marketData = await fetchMarketData();
     } catch (error) {
-        return {
-            content: [{ type: "text" as const, text: "Error: Failed to fetch market data." }],
-            isError: true,
-        };
+        return makeToolError("Error: Failed to fetch market data.");
+    }
+
+    if (!isMarketDataPayload(marketData)) {
+        return makeToolError("Error: Invalid market data response.");
     }
 
     let foundOption: any = null;
     let foundAsset = "";
 
-    if (marketData.data && marketData.data.market) {
-        for (const asset of Object.keys(marketData.data.market)) {
-            const market = marketData.data.market[asset];
-            for (const expiry of market.expiries || []) {
-                const opts = market.options[expiry];
-                if (!opts) continue;
-                const allOpts = [...(opts.call || []), ...(opts.put || [])];
-                foundOption = allOpts.find((o: any) => o.optionId === targetId);
+    for (const asset of Object.keys(marketData.data!.market!)) {
+        const market = marketData.data!.market![asset];
+        for (const expiry of market.expiries || []) {
+            const opts = market.options?.[expiry];
+            if (!opts) continue;
+            const allOpts = [...(opts.call || []), ...(opts.put || [])];
+            foundOption = allOpts.find((o: any) => o.optionId === targetId);
 
-                if (foundOption) {
-                    foundAsset = asset;
-                    break;
-                }
+            if (foundOption) {
+                foundAsset = asset;
+                break;
             }
-            if (foundOption) break;
         }
+        if (foundOption) break;
     }
 
     if (!foundOption) {
-        return {
-            content: [{ type: "text" as const, text: `Error: Option ID ${targetId} not found in market data.` }],
-            isError: true
-        };
+        return makeToolError(`Error: Option ID ${targetId} not found in market data.`);
     }
 
     const output = {
@@ -1013,20 +1199,14 @@ async function handleGetGreeks(params: { option_id: string }): Promise<CallToolR
         iv: foundOption.markIv ?? foundOption.iv ?? 0
     };
 
-    return {
-        content: [{
-            type: "text" as const,
-            text: JSON.stringify(output, null, 2)
-        }],
-        structuredContent: output
-    };
+    return makeToolSuccess(output, true);
 
 }
 
 async function handleSettlePosition(params: { option_id: string; underlying_asset: string }): Promise<CallToolResult> {
     try {
         const { option_id, underlying_asset } = params;
-        const optionTokenId = BigInt(option_id);
+        const optionTokenId = parseBigIntInput(option_id, "option_id");
         const normalizedAsset = normalizeUnderlyingAsset(underlying_asset);
         if (!normalizedAsset) {
             throw new Error(`Invalid underlying asset: ${underlying_asset}`);
@@ -1036,6 +1216,11 @@ async function handleSettlePosition(params: { option_id: string; underlying_asse
         const parsed = parseOptionTokenId(optionTokenId);
         if (parsed.underlyingAssetIndex !== assetConfig.index) {
             throw new Error(`Underlying asset mismatch. Option belongs to asset index ${parsed.underlyingAssetIndex}, but ${assetName} was provided.`);
+        }
+        const now = Math.floor(Date.now() / 1000);
+        if (now < parsed.expiry) {
+            const expiryIso = new Date(parsed.expiry * 1000).toISOString();
+            throw new Error(`Option is not expired yet (${expiryIso}). Use callput_close_position before expiry.`);
         }
 
         // Settle Params: address[] _path, uint16 _underlyingAssetIndex, uint256 _optionTokenId, uint256 _minOutWhenSwap, bool _withdrawNAT
@@ -1062,33 +1247,28 @@ async function handleSettlePosition(params: { option_id: string; underlying_asse
             instruction: "Sign and broadcast this transaction to settle the position."
         };
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2)
-            }],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
 
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error generating settlement transaction: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error generating settlement transaction: ${error.message}`);
     }
 }
 
 async function handleApproveUsdc(params: { amount: string }): Promise<CallToolResult> {
     try {
-        const { amount } = params;
+        const amount = params.amount?.trim();
+        if (!amount) throw new Error("amount is required.");
         const iface = new ethers.Interface(ERC20_ABI);
 
         // If the amount looks like max uint256, use it raw. Otherwise parse as USDC (6 decimals).
         let approvalAmount: bigint;
-        if (amount.length > 30) {
+        if (/^\d+$/.test(amount) && amount.length > 30) {
             approvalAmount = BigInt(amount);
         } else {
             approvalAmount = ethers.parseUnits(amount, 6);
+        }
+        if (approvalAmount <= 0n) {
+            throw new Error("Approval amount must be greater than 0.");
         }
 
         const data = iface.encodeFunctionData("approve", [
@@ -1106,39 +1286,26 @@ async function handleApproveUsdc(params: { amount: string }): Promise<CallToolRe
             instruction: "Sign this transaction BEFORE placing any trade. This allows the Router to pull USDC from your wallet."
         };
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2)
-            }],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error generating approval transaction: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error generating approval transaction: ${error.message}`);
     }
 }
 
 async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }): Promise<CallToolResult> {
     try {
         const { tx_hash, is_open } = params;
+        ensureValidTxHash(tx_hash);
         const generateRequestKeyTopic = ethers.id("GenerateRequestKey(address,bytes32,bool)");
 
         // 1. Get Transaction Receipt
         const receipt = await provider.getTransactionReceipt(tx_hash);
         if (!receipt) {
-            return {
-                content: [{ type: "text" as const, text: JSON.stringify({ status: "not_found", message: "Transaction not found or not yet mined. Try again later." }) }]
-            };
+            return makeToolSuccess({ status: "not_found", message: "Transaction not found or not yet mined. Try again later." });
         }
 
         if (receipt.status === 0) {
-            return {
-                content: [{ type: "text" as const, text: JSON.stringify({ status: "reverted", message: "Transaction reverted on-chain. Check if USDC was approved and parameters were correct." }) }],
-                isError: true
-            };
+            return makeToolError(JSON.stringify({ status: "reverted", message: "Transaction reverted on-chain. Check if USDC was approved and parameters were correct." }));
         }
 
         // 2. Parse GenerateRequestKey event from logs
@@ -1162,10 +1329,7 @@ async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }
         }
 
         if (!requestKey) {
-            return {
-                content: [{ type: "text" as const, text: JSON.stringify({ status: "no_key", message: "Transaction succeeded but GenerateRequestKey event not found. This may not be a Callput position transaction." }) }],
-                isError: true
-            };
+            return makeToolError(JSON.stringify({ status: "no_key", message: "Transaction succeeded but GenerateRequestKey event not found. This may not be a Callput position transaction." }));
         }
 
         // 3. Poll position request status
@@ -1201,24 +1365,16 @@ async function handleCheckTxStatus(params: { tx_hash: string; is_open: boolean }
             output.message = "Order is pending execution by the keeper. Check again in ~30 seconds.";
         }
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2)
-            }],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error checking tx status: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error checking tx status: ${error.message}`);
     }
 }
 
 async function handleGetMyPositions(params: { address: string }): Promise<CallToolResult> {
     try {
         const { address } = params;
+        ensureValidAddress(address, "address");
         const MY_POSITION_API = "https://4wfz19irck.execute-api.ap-southeast-1.amazonaws.com/default/app-lambda-base-prod-query?method=getMyPositions&address=";
         const response = await fetch(MY_POSITION_API + address);
         if (!response.ok) throw new Error("Failed to fetch positions from Lambda.");
@@ -1227,9 +1383,10 @@ async function handleGetMyPositions(params: { address: string }): Promise<CallTo
         // format result for readability: Simplify the structure
         const positions: any[] = [];
         ["BTC", "ETH"].forEach((asset: string) => {
-            const assetPositions = result[asset] || [];
+            const assetPositions = Array.isArray(result?.[asset]) ? result[asset] : [];
             assetPositions.forEach((gp: any) => {
-                gp.positions.forEach((pos: any) => {
+                const groupedPositions = Array.isArray(gp?.positions) ? gp.positions : [];
+                groupedPositions.forEach((pos: any) => {
                     positions.push({
                         asset,
                         expiry: new Date(Number(gp.expiry) * 1000).toUTCString(),
@@ -1247,20 +1404,21 @@ async function handleGetMyPositions(params: { address: string }): Promise<CallTo
 
         // Enrich with PnL if possible using market data
         const marketData = await fetchMarketData();
+        if (!isMarketDataPayload(marketData)) {
+            throw new Error("Invalid market data response.");
+        }
         positions.forEach(pos => {
-            const assetMark = marketData.data.market[pos.asset === "BTC" ? "BTC" : "ETH"];
+            const assetMark = marketData.data!.market![pos.asset === "BTC" ? "BTC" : "ETH"];
             if (assetMark) {
                 // Find mark price in S3
-                let found = false;
                 for (const expiry of assetMark.expiries || []) {
-                    const opts = assetMark.options[expiry];
+                    const opts = assetMark.options?.[expiry];
                     if (!opts) continue;
                     const leg = [...(opts.call || []), ...(opts.put || [])].find(l => l.optionId === pos.option_id);
                     if (leg) {
                         const markPrice = leg.markPrice || 0;
                         const execPrice = Number(pos.avg_price);
                         pos.pnl = pos.is_buy ? (markPrice - execPrice) : (execPrice - markPrice);
-                        found = true;
                         break;
                     }
                 }
@@ -1273,25 +1431,18 @@ async function handleGetMyPositions(params: { address: string }): Promise<CallTo
             total_active_count: positions.length
         };
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2)
-            }],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error fetching positions: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error fetching positions: ${error.message}`);
     }
 }
 
 async function handleClosePosition(params: { address: string; option_token_id: string; size: string; underlying_asset: string }): Promise<CallToolResult> {
     try {
-        const { option_token_id, size, underlying_asset } = params;
-        const optionTokenId = BigInt(option_token_id);
+        const { address, option_token_id, size, underlying_asset } = params;
+        ensureValidAddress(address, "address");
+        const optionTokenId = parseBigIntInput(option_token_id, "option_token_id");
+        const sizeDelta = parsePositiveBigIntInput(size, "size");
         const normalizedAsset = normalizeUnderlyingAsset(underlying_asset);
         if (!normalizedAsset) throw new Error(`Invalid underlying asset: ${underlying_asset}`);
         const assetName = normalizedAsset;
@@ -1319,7 +1470,7 @@ async function handleClosePosition(params: { address: string; option_token_id: s
         const data = iface.encodeFunctionData("createClosePosition", [
             assetConfig.index,
             optionTokenId,
-            BigInt(size),
+            sizeDelta,
             path,
             minAmountOut,
             minOutWhenSwap,
@@ -1333,39 +1484,34 @@ async function handleClosePosition(params: { address: string; option_token_id: s
             data: data,
             value: executionFee.toString(),
             chain_id: CONFIG.CHAIN_ID,
+            account: address,
             description: `Close position for Option ID ${option_token_id} | Size: ${size}`,
             instruction: "Sign this transaction to exit the position."
         };
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(output, null, 2)
-            }],
-            structuredContent: output
-        };
+        return makeToolSuccess(output, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error generating close transaction: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error generating close transaction: ${error.message}`);
     }
 }
 
 async function handleGetMarketTrends(): Promise<CallToolResult> {
     try {
         const marketData = await fetchMarketData();
+        if (!isMarketDataPayload(marketData)) {
+            throw new Error("Invalid market data response.");
+        }
         const trends: any = {};
 
         ["BTC", "ETH"].forEach(asset => {
-            const m = marketData.data.market[asset];
+            const m = marketData.data!.market![asset];
             if (!m) return;
 
             // Calculate Average IV across all expiries/strikes
             let totalIv = 0;
             let count = 0;
             for (const expiry of m.expiries || []) {
-                const optionsAtExpiry = m.options[expiry] || {};
+                const optionsAtExpiry = m.options?.[expiry] || {};
                 const allOptions = [...(optionsAtExpiry.call || []), ...(optionsAtExpiry.put || [])];
                 allOptions.forEach((o: any) => {
                     const optionIv = o.markIv ?? o.iv;
@@ -1380,10 +1526,10 @@ async function handleGetMarketTrends(): Promise<CallToolResult> {
             // Spot Price Estimator (from chains)
             let spot = 0;
             if (m.expiries && m.expiries.length > 0) {
-                const c = m.options[m.expiries[0]]?.call || [];
+                const c = m.options?.[m.expiries[0]]?.call || [];
                 if (c.length > 0) {
                     // Use At-The-Money or the first strike
-                    const itm = c.sort((a: any, b: any) => a.strikePrice - b.strikePrice)[0];
+                    const itm = [...c].sort((a: any, b: any) => a.strikePrice - b.strikePrice)[0];
                     spot = itm.strikePrice + (itm.markPrice || 0);
                 }
             }
@@ -1396,18 +1542,9 @@ async function handleGetMarketTrends(): Promise<CallToolResult> {
             };
         });
 
-        return {
-            content: [{
-                type: "text" as const,
-                text: JSON.stringify(trends, null, 2)
-            }],
-            structuredContent: trends
-        };
+        return makeToolSuccess(trends, true);
     } catch (error: any) {
-        return {
-            content: [{ type: "text" as const, text: `Error fetching trends: ${error.message}` }],
-            isError: true,
-        };
+        return makeToolError(`Error fetching trends: ${error.message}`);
     }
 }
 

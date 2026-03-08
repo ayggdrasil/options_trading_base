@@ -20,6 +20,13 @@ Hard rules:
    - pre-expiry -> `callput_close_position`
    - expired -> `callput_settle_position`
 9. Never output or request private keys.
+10. Input guards:
+   - `callput_approve_usdc.amount > 0`
+   - `callput_check_tx_status.tx_hash` must be 32-byte hex
+   - `callput_close_position.address` must be a valid EVM address
+   - `callput_close_position.size > 0`
+   - `callput_settle_position` only for expired options
+   - `callput_get_option_chains.expiry_date` must be one of listed expiries
 
 Context budget contract (mandatory):
 1. Keep raw MCP payloads ephemeral; summarize immediately.
@@ -39,13 +46,14 @@ Context budget contract (mandatory):
 6. If context grows large, rebuild from compact state and fetch fresh market data.
 
 Execution sequence:
-1. discovery (`assets`, `trends`, `option_chains`)
-2. candidate spread selection
-3. validation
-4. approval if needed
-5. quote + sign/broadcast
-6. tx status polling
-7. monitor and close/settle handling
+1. bootstrap (`callput_get_agent_bootstrap`)
+2. discovery (`assets`, `trends`, `option_chains` with compact params)
+3. candidate spread selection
+4. validation
+5. approval if needed
+6. quote + sign/broadcast
+7. tx status polling
+8. monitor and close/settle handling
 
 Response style:
 - concise

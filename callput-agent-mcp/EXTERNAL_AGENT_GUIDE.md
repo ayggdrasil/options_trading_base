@@ -2,6 +2,8 @@
 
 This guide is for OpenClaw and other external agents integrating with `callput-agent-mcp`.
 
+`<repo_root>` means the local root directory where this GitHub repository is cloned.
+
 ## Goal
 
 Prevent common execution failures:
@@ -13,13 +15,14 @@ Prevent common execution failures:
 
 ```bash
 git clone https://github.com/ayggdrasil/options_trading_base.git
-cd options_trading_base/callput-agent-mcp
+cd <repo_root>/callput-agent-mcp
 npm install
 npm run build
 node build/test_s3_fetch.js
+npm run verify:core
 ```
 
-Expected result: active options count is returned.
+Expected result: active options count is returned and core MCP checks pass.
 
 ## Client Connection
 
@@ -30,7 +33,7 @@ Expected result: active options count is returned.
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": ["/path/to/options_trading_base/callput-agent-mcp/build/index.js"],
+      "args": ["<repo_root>/callput-agent-mcp/build/index.js"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -47,7 +50,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["./options_trading_base/callput-agent-mcp/build/index.js"],
+  args: ["<repo_root>/callput-agent-mcp/build/index.js"],
   env: { RPC_URL: "https://mainnet.base.org" }
 });
 
@@ -60,6 +63,7 @@ await client.connect(transport);
 ## Canonical Tools
 
 ### Discovery
+- `callput_get_agent_bootstrap`
 - `callput_get_available_assets`
 - `callput_get_market_trends`
 - `callput_get_option_chains`
@@ -95,6 +99,14 @@ Your orchestrator must enforce all rules below.
 7. For exits:
    - pre-expiry: `callput_close_position`
    - post-expiry: `callput_settle_position`
+8. Enforce strict input checks before tool calls:
+   - `callput_approve_usdc.amount > 0`
+   - `callput_check_tx_status.tx_hash` is 32-byte hex
+   - `callput_close_position.address` is valid EVM address
+   - `callput_close_position.size > 0`
+   - `callput_settle_position` only for expired option IDs
+   - `callput_get_option_chains.expiry_date` must match an available expiry code
+9. At session start, call `callput_get_agent_bootstrap` and follow its compact defaults.
 
 ---
 
@@ -118,6 +130,7 @@ To reduce context overflow risk in long-running agent sessions:
    - max 1 quote call
 4. Narrow tool inputs early:
    - use `option_type` and `expiry_date` whenever available
+   - use `max_expiries` and `max_strikes_per_side` for compact discovery
    - avoid broad chain fetch loops across all expiries repeatedly
 5. Polling mode:
    - keep only latest `callput_check_tx_status` snapshot
@@ -136,7 +149,7 @@ To reduce context overflow risk in long-running agent sessions:
 
 1. `callput_get_available_assets`
 2. `callput_get_market_trends`
-3. `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
+3. `callput_get_option_chains(underlying_asset, expiry_date?, option_type?, max_expiries?, max_strikes_per_side?)`
 
 Notes:
 - chain output format is `[Strike, Price, Liquidity, MaxQty, OptionID]`
@@ -240,7 +253,7 @@ Fix:
 
 ## OpenClaw System Prompt Block
 
-Use `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/OPENCLAW_SYSTEM_PROMPT.md` as the base policy block in your OpenClaw system prompt.
+Use `<repo_root>/callput-agent-mcp/OPENCLAW_SYSTEM_PROMPT.md` as the base policy block in your OpenClaw system prompt.
 
 At minimum, include:
 - spread-only execution

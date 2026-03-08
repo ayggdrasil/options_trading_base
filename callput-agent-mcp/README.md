@@ -4,6 +4,9 @@ Model Context Protocol (MCP) server for Callput options on Base L2.
 
 This server is for **spread trading execution support**. It provides market discovery, spread validation, quote generation, and position lifecycle tools.
 
+For external agents with no prior context, start with:
+- `callput_get_agent_bootstrap`
+
 ## Critical Rules (Read First)
 
 1. `callput_get_option_chains` returns **vanilla legs for discovery only**.
@@ -26,6 +29,14 @@ Input normalization:
 Slippage behavior:
 - `callput_request_quote.slippage` is now applied to on-chain `minSize` protection
 - quote output includes `expected_size`, `min_size`, and raw values
+
+Input guard behavior:
+- `callput_approve_usdc.amount` must be greater than `0`
+- `callput_check_tx_status.tx_hash` must be a 32-byte hex hash
+- `callput_close_position.address` must be a valid EVM address
+- `callput_close_position.size` must be greater than `0`
+- `callput_settle_position` rejects non-expired options (use `callput_close_position` before expiry)
+- `callput_get_option_chains.expiry_date` returns an explicit error if the requested expiry does not exist
 
 ---
 
@@ -67,6 +78,17 @@ Expected:
 Optional connectivity check (not a tradability check):
 ```bash
 node build/test_connection.js
+```
+
+Recommended full verification bundle:
+```bash
+npm run verify:core
+```
+
+Additional lifecycle checks:
+```bash
+npm run verify:settle
+npm run verify:e2e
 ```
 
 ---
@@ -112,6 +134,7 @@ await client.connect(transport);
 ## Canonical Tool Set
 
 ### Market and Discovery
+- `callput_get_agent_bootstrap`
 - `callput_get_available_assets`
 - `callput_get_market_trends`
 - `callput_get_option_chains`
@@ -136,9 +159,10 @@ Legacy aliases (backward compatibility only):
 ## Recommended Execution Loop
 
 1. Discover
+   - `callput_get_agent_bootstrap`
    - `callput_get_available_assets`
    - `callput_get_market_trends`
-   - `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)` (recommend `BTC`/`ETH`)
+   - `callput_get_option_chains(underlying_asset, expiry_date?, option_type?, max_expiries?, max_strikes_per_side?)` (recommend `BTC`/`ETH`)
 2. Choose two legs (long/short) for spread strategy.
 3. Validate
    - `callput_validate_spread(strategy, long_leg_id, short_leg_id)`
@@ -170,6 +194,9 @@ Legacy aliases (backward compatibility only):
 - estimated vault-based `maxTradableQuantity`
 
 If validation fails, do not quote.
+
+Low-context recommendation:
+- Use `max_expiries=1` and `max_strikes_per_side=6` for first-pass candidate selection.
 
 ---
 
@@ -226,4 +253,3 @@ Never send private keys into MCP tool arguments or logs.
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [EXAMPLE_OUTPUT.md](./EXAMPLE_OUTPUT.md)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
-

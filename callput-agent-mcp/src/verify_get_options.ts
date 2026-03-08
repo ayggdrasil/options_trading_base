@@ -21,11 +21,14 @@ async function runVerify() {
 
         console.log("\n1️⃣  Fetching WBTC Options...");
         const result: any = await client.callTool({
-            name: "get_option_chains",
+            name: "callput_get_option_chains",
             arguments: {
                 underlying_asset: "WBTC"
             }
         });
+        if (result.isError) {
+            throw new Error((result.content?.[0] as any)?.text || "callput_get_option_chains failed");
+        }
 
         if (result.content && result.content[0].text) {
             const data = JSON.parse(result.content[0].text);
@@ -44,8 +47,8 @@ async function runVerify() {
             const calls = data.expiries[firstExpiry].call;
             console.log("\nSample Calls (First 5):");
             calls.slice(0, 5).forEach((c: any, i: number) => {
-                // Format: [Strike, Price, Liquidity, ID]
-                console.log(`[${i}] Strike: ${c[0]} | Price: ${c[1]} | Liquidity (Vault): ${c[2]}`);
+                // Format: [Strike, Price, Liquidity, MaxQty, OptionID]
+                console.log(`[${i}] Strike: ${c[0]} | Price: ${c[1]} | Liquidity (Vault): ${c[2]} | MaxQty: ${c[3]}`);
             });
 
             if (totalCalls === 0) {

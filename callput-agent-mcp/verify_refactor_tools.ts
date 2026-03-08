@@ -1,6 +1,10 @@
-
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { assertToolSuccess, getToolJson } from "./verify_utils.ts";
+
+type ChainsPayload = {
+    expiries: Record<string, { call?: unknown[]; put?: unknown[] }>;
+};
 
 async function main() {
     const transport = new StdioClientTransport({
@@ -15,6 +19,8 @@ async function main() {
         capabilities: {}
     });
 
+    let exitCode = 0;
+
     try {
         await client.connect(transport);
         console.log("✅ Connected to MCP Server");
@@ -25,6 +31,7 @@ async function main() {
         tools.tools.forEach(t => console.log(` - ${t.name}`));
 
         const expectedTools = [
+            "callput_get_agent_bootstrap",
             "callput_get_available_assets",
             "callput_get_option_chains",
             "callput_validate_spread",
@@ -35,26 +42,28 @@ async function main() {
         const missing = expectedTools.filter(t => !tools.tools.find(tool => tool.name === t));
         if (missing.length > 0) {
             console.error("❌ Missing expected tools:", missing);
-            process.exit(1);
-        } else {
-            console.log("✅ All new tool names present.");
+            exitCode = 1;
+            return;
         }
+        console.log("✅ All new tool names present.");
 
-        // 2. Call get_available_assets
+        // 2. Call callput_get_available_assets
         console.log("\n🧪 Testing callput_get_available_assets...");
         const assets = await client.callTool({
             name: "callput_get_available_assets",
             arguments: {}
         });
+        assertToolSuccess(assets, "callput_get_available_assets");
         console.log("Result:", JSON.stringify(assets, null, 2));
 
-        // 3. Call get_option_chains (BTC)
+        // 3. Call callput_get_option_chains (BTC)
         console.log("\n🧪 Testing callput_get_option_chains (BTC)...");
         const chains = await client.callTool({
             name: "callput_get_option_chains",
             arguments: { underlying_asset: "BTC" }
         });
-        const chainContent = JSON.parse((chains.content[0] as any).text);
+        assertToolSuccess(chains, "callput_get_option_chains");
+        const chainContent = getToolJson<ChainsPayload>(chains);
 
         console.log(`✅ Fetched ${Object.keys(chainContent.expiries).length} expiries for BTC.`);
 
@@ -63,13 +72,14 @@ async function main() {
         if (firstExpiry) {
             const calls = chainContent.expiries[firstExpiry].call;
             if (calls && calls.length > 0) {
-                const sample = calls[0];
+                const sample = calls[0] as unknown[];
                 // [Strike, Price, Liquidity, MaxQty, ID]
                 if (sample.length === 5) {
                     console.log(`✅ MaxQty field present: ${sample[3]}`);
                 } else {
                     console.error("❌ MaxQty field MISSING in compact array:", sample);
-                    process.exit(1);
+                    exitCode = 1;
+                    return;
                 }
             }
         }
@@ -78,10 +88,14 @@ async function main() {
 
     } catch (error) {
         console.error("❌ Verification Failed:", error);
-        process.exit(1);
+        exitCode = 1;
     } finally {
-        // await client.close(); // SDK might not have close() on client, just exit
-        process.exit(0);
+        try {
+            await client.close();
+        } catch {
+            // ignore close errors
+        }
+        process.exit(exitCode);
     }
 }
 

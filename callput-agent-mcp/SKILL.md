@@ -12,12 +12,14 @@ Use this skill when the user asks for:
 - open position management (close/settle)
 
 ## One-line Intent
-`시장 분석 -> 방향 결정 -> 스프레드 후보 검증 -> 실행/포지션 정리`
+`Market analysis -> direction setup -> tradable spread validation -> execution and position adjustment`
 
 ## Canonical MCP Target
-- server path: `/Users/kang/Desktop/01_callput/80_callput_for_agent/callput-agent-mcp/build/index.js`
+- server path: `<repo_root>/callput-agent-mcp/build/index.js`
 - do not use legacy `/mcp-server/build/index.js` for new agents
 - use canonical tool names: `callput_*` only
+
+`<repo_root>` means the local root directory where this GitHub repository is cloned.
 
 ## Non-Negotiable Rules
 
@@ -33,6 +35,13 @@ Use this skill when the user asks for:
    - pre-expiry: `callput_close_position`
    - expired: `callput_settle_position`
 8. Never expose private keys in MCP output.
+9. Enforce input guards before calls:
+   - `callput_approve_usdc.amount > 0`
+   - `callput_check_tx_status.tx_hash` must be 32-byte hex
+   - `callput_close_position.address` must be valid EVM address
+   - `callput_close_position.size > 0`
+   - `callput_settle_position` is only for expired options
+   - `callput_get_option_chains.expiry_date` must match a listed expiry
 
 ## Context Overflow Guardrails
 
@@ -57,9 +66,14 @@ Use this skill when the user asks for:
 ## 4-Step Flow
 
 ### 1) Market Analysis
+- `callput_get_agent_bootstrap`
 - `callput_get_available_assets`
 - `callput_get_market_trends`
-- `callput_get_option_chains(underlying_asset, expiry_date?, option_type?)`
+- `callput_get_option_chains(underlying_asset, expiry_date?, option_type?, max_expiries?, max_strikes_per_side?)`
+
+Compact defaults for no-prior-context agents:
+- `max_expiries=1`
+- `max_strikes_per_side=6`
 
 ### 2) Direction Setup
 - Bullish: usually start from `BuyCallSpread`
@@ -89,6 +103,6 @@ Use this skill when the user asks for:
 - Tx status `reverted`: check approval, params, and chain conditions.
 
 ## Short Commands for External Agents
-- `ETH 약세 시나리오로 거래 가능한 Put Spread 1개만 검증해서 실행까지 진행해.`
-- `포지션 점검 후 만기 전은 close, 만기 후는 settle로 정리해.`
-- `시장 분석 + 검증 통과한 스프레드 후보만 보고하고 실행은 하지 마.`
+- `Analyze ETH with a bearish scenario, validate one tradable Put Spread, and execute it.`
+- `Review positions, close pre-expiry positions, and settle expired positions.`
+- `Run market analysis and report only validated spread candidates without execution.`

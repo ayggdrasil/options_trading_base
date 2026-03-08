@@ -1,8 +1,0 @@
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.16;
-
-import { IERC165Internal } from './IERC165Internal.sol';
-
-interface IERC165BaseInternal is IERC165Internal {
-    error ERC165Base__InvalidInterfaceId();
-}

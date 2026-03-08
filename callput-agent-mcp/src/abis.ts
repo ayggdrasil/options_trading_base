@@ -17,15 +17,15 @@ export const VAULT_ABI = [
 
 export const POSITION_MANAGER_ABI = [
     "function createOpenPosition(uint16 _underlyingAssetIndex, uint8 _length, bool[4] memory _isBuys, bytes32[4] memory _optionIds, bool[4] memory _isCalls, uint256 _minSize, address[] memory _path, uint256 _amountIn, uint256 _minOutWhenSwap, address _leadTrader) external payable returns (bytes32)",
-    "function createClosePosition(uint16 _underlyingAssetIndex, bytes32 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawETH) external payable returns (bytes32)",
+    "function createClosePosition(uint16 _underlyingAssetIndex, uint256 _optionTokenId, uint256 _size, address[] memory _path, uint256 _minAmountOut, uint256 _minOutWhenSwap, bool _withdrawNAT) external payable returns (bytes32)",
     "function executionFee() view returns (uint256)",
-    "function openPositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, bytes32 optionTokenId, uint256 amountIn, uint256 sizeOut, uint256 executionFee, uint256 blockNumber, uint256 blockTime, bool isExecuted, bool isCancelled)",
-    "function closePositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, bytes32 optionTokenId, uint256 sizeDelta, uint256 amountOut, uint256 executionFee, uint256 blockNumber, uint256 blockTime, bool isExecuted, bool isCancelled)",
-    "event GenerateRequestKey(address indexed account, bytes32 key, bool isOpen)",
+    "function openPositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, uint40 expiry, uint256 optionTokenId, uint256 minSize, uint256 amountIn, uint256 minOutWhenSwap, bool isDepositedInNAT, uint40 blockTime, uint8 status, uint256 sizeOut, uint256 executionPrice, uint40 processBlockTime, uint256 amountOut)",
+    "function closePositionRequests(bytes32 key) view returns (address account, uint16 underlyingAssetIndex, uint40 expiry, uint256 optionTokenId, uint256 size, uint256 minAmountOut, uint256 minOutWhenSwap, bool withdrawNAT, uint40 blockTime, uint8 status, uint256 amountOut, uint256 executionPrice, uint40 processBlockTime)",
+    "event GenerateRequestKey(address indexed account, bytes32 indexed key, bool indexed isOpen)",
 ];
 
 export const SETTLE_MANAGER_ABI = [
-    "function settlePosition(address[] memory _path, uint16 _underlyingAssetIndex, bytes32 _optionId, uint256 _minOut, bool _withdrawETH) external payable"
+    "function settlePosition(address[] memory _path, uint16 _underlyingAssetIndex, uint256 _optionTokenId, uint256 _minOutWhenSwap, bool _withdrawNAT) external payable"
 ];
 
 export const ERC20_ABI = [
