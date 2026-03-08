@@ -1,14 +1,14 @@
 # External Agent Integration Guide (Callput MCP)
 
 ## Important Runtime Path Rule
-- `<repo_root>` is a documentation placeholder only.
-- In real OpenClaw/Claude MCP config, replace `<repo_root>` with an absolute local path.
-- Do not keep literal `<repo_root>` in `args` at runtime.
+- `<mcp_dir>` and `<mcp_entry>` are documentation placeholders only.
+- In real OpenClaw/Claude MCP config, replace them with absolute local paths.
+- Do not keep literal `<mcp_entry>` in `args` at runtime.
 - Prefer paths without spaces to reduce launcher parsing errors.
 
 This guide is for OpenClaw and other external agents integrating with `callput-agent-mcp`.
 
-`<repo_root>` means the local root directory where this GitHub repository is cloned.
+`<mcp_dir>` means the absolute local path to `callput-agent-mcp`. `<mcp_entry>` means `<mcp_dir>/build/index.js`.
 
 ## Goal
 
@@ -21,7 +21,7 @@ Prevent common execution failures:
 
 ```bash
 git clone https://github.com/ayggdrasil/options_trading_base.git
-cd <repo_root>/callput-agent-mcp
+cd <mcp_dir>
 npm install
 npm run build
 node build/test_s3_fetch.js
@@ -39,7 +39,7 @@ Expected result: active options count is returned and core MCP checks pass.
   "mcpServers": {
     "callput": {
       "command": "node",
-      "args": ["<repo_root>/callput-agent-mcp/build/index.js"],
+      "args": ["<mcp_entry>"],
       "env": {
         "RPC_URL": "https://mainnet.base.org"
       }
@@ -56,7 +56,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["<repo_root>/callput-agent-mcp/build/index.js"],
+  args: ["<mcp_entry>"],
   env: { RPC_URL: "https://mainnet.base.org" }
 });
 
@@ -259,7 +259,7 @@ Fix:
 
 ## OpenClaw System Prompt Block
 
-Use `<repo_root>/callput-agent-mcp/OPENCLAW_SYSTEM_PROMPT.md` as the base policy block in your OpenClaw system prompt.
+Use `<mcp_dir>/OPENCLAW_SYSTEM_PROMPT.md` as the base policy block in your OpenClaw system prompt.
 
 At minimum, include:
 - spread-only execution

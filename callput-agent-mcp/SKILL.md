@@ -7,9 +7,9 @@ license: MIT
 # Callput Option Trader (Compact)
 
 ## Important Runtime Path Rule
-- `<repo_root>` is a documentation placeholder only.
-- In real OpenClaw/Claude MCP config, you must replace it with an absolute local path.
-- Do not keep literal `<repo_root>` in `args` at runtime.
+- `<mcp_entry>` is a documentation placeholder only.
+- In real OpenClaw/Claude MCP config, replace it with an absolute local path.
+- Do not keep literal `<mcp_entry>` in `args` at runtime.
 - Prefer a path without spaces to avoid launcher parsing issues.
 
 Use this skill when the user asks for:
@@ -21,11 +21,11 @@ Use this skill when the user asks for:
 `Market analysis -> direction setup -> tradable spread validation -> execution and position adjustment`
 
 ## Canonical MCP Target
-- server path: `<repo_root>/callput-agent-mcp/build/index.js`
+- server path: `<mcp_entry>`
 - do not use legacy `/mcp-server/build/index.js` for new agents
 - use canonical tool names: `callput_*` only
 
-`<repo_root>` means the local root directory where this GitHub repository is cloned.
+`<mcp_entry>` means the absolute local path to `build/index.js`.
 
 ## Non-Negotiable Rules
 
