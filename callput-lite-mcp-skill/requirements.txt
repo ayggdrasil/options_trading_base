@@ -1,0 +1,2 @@
+# This package is Node.js MCP only.
+# External agents do not need Python SDK installation.
